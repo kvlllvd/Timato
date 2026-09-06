@@ -36,6 +36,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Шрифт — до создания окна: интерфейс собирается уже с ним.
         DisplayFont.register()
         Notifier.requestPermissionIfPossible()
+        // Звонок готовится сразу: иначе первый же переход «работа → отдых»
+        // ждал бы подъёма звукового движка.
+        Notifier.prewarm()
 
         let controller = TimerWindowController()
         controller.showWindow(nil)

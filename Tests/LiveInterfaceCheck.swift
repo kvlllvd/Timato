@@ -177,8 +177,17 @@ enum LiveInterfaceCheck {
         print("\nД1 · отработанный отрезок и авто-отдых")
         button("25 min")?.performClick(nil)
         pump()
+        // Первый переход за запуск, и потому самый дорогой: раньше он поднимал
+        // звуковой движок прямо на главном потоке и подвисал на треть секунды,
+        // а все следующие переходы шли быстро. Порог с запасом: было ~370 мс,
+        // стало ~10 мс, между ними мерить нечего.
+        let switchStart = DispatchTime.now().uptimeNanoseconds
         button("Finish now")?.performClick(nil)
+        let firstSwitchMs = Double(DispatchTime.now().uptimeNanoseconds - switchStart) / 1_000_000
+        check("Д1", "первый переход работа→отдых не подвисает", firstSwitchMs < 150,
+              String(format: "главный поток занят %.1f мс", firstSwitchMs))
         pump(0.8)
+        check("Д1", "звонок при этом звучит", Chime.isSounding)
         check("Д1", "сам встал отдых 05:00", face() == "05:00", "получено «\(face())»")
         check("Д1", "фон отдыха не чёрный", hex(backdrop()) != "#000000", hex(backdrop()))
         check("Д2", "25 минут закрасили половину черточки", segments.filledHalves == 1,

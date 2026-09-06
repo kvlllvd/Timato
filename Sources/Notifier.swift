@@ -16,6 +16,15 @@ enum Notifier {
     /// Баннер уведомления при этом остаётся — молчит именно звонок.
     static var isMuted = false
 
+    /// Готовит звонок заранее, ещё до первого отсчёта.
+    ///
+    /// Без этого первый же звонок поднимал звуковой движок прямо на главном
+    /// потоке — а звонит он ровно в момент перехода «работа → отдых», и переход
+    /// на нём подвисал. Один раз за запуск, дальше движок уже поднят.
+    static func prewarm() {
+        Chime.prewarm()
+    }
+
     static func requestPermissionIfPossible() {
         guard Bundle.main.bundleIdentifier != nil else { return }
         let center = UNUserNotificationCenter.current()
@@ -91,27 +100,58 @@ enum Chime {
     /// Сколько звучит одна нота с учётом затухания.
     private static let noteTail: Double = 1.1
 
+    /// Своя очередь на всё, что делает звонок. Подъём звукового движка стоит
+    /// около двухсот миллисекунд — он открывает устройство вывода, — а синтез
+    /// буфера ещё десяток. На главном потоке это была видимая задержка ровно
+    /// там, где её замечаешь: звонок звучит в момент перехода «работа → отдых»,
+    /// и первый переход подвисал, а все следующие шли быстро.
+    ///
+    /// Очередь заодно и защищает состояние ниже: трогают его только отсюда.
+    private static let queue = DispatchQueue(label: "com.dkovalev.pimer.chime",
+                                             qos: .userInitiated)
+
     /// Движок и узел живут статически: локальные умолкают вместе с уходом
     /// из функции — буфер обрывается на первой же ноте.
     private static var engine: AVAudioEngine?
     private static var player: AVAudioPlayerNode?
+    /// Готовые буферы обоих звонков. Синтез не зависит ни от чего, кроме вида
+    /// отсчёта, — считать его заново на каждый звонок незачем.
+    private static var buffers: [Kind: AVAudioPCMBuffer] = [:]
 
-    static func play(kind: Kind) {
-        let notes = kind == .focus ? focusNotes : restNotes
-        guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1),
-              let buffer = makeBuffer(notes: notes, format: format),
-              let player = prepare(format: format) else {
-            NSSound.beep()
-            return
+    private static let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate,
+                                              channels: 1)
+
+    /// Поднимает движок и считает оба буфера заранее, в стороне от главного потока.
+    static func prewarm() {
+        queue.async {
+            _ = readyPlayer()
+            for kind in [Kind.focus, .rest] { _ = readyBuffer(kind: kind) }
         }
-        player.stop()
-        player.play()
-        player.scheduleBuffer(buffer, at: nil, options: [], completionHandler: nil)
     }
 
+    static func play(kind: Kind) {
+        queue.async {
+            guard let buffer = readyBuffer(kind: kind), let player = readyPlayer() else {
+                NSSound.beep()
+                return
+            }
+            player.stop()
+            player.play()
+            player.scheduleBuffer(buffer, at: nil, options: [], completionHandler: nil)
+        }
+    }
+
+    #if LIVE_CHECK
+    /// Звучит ли звонок прямо сейчас. Только для живой проверки: звонок теперь
+    /// уходит на свою очередь, и что он вообще звучит, иначе ничем не видно.
+    static var isSounding: Bool { queue.sync { player?.isPlaying ?? false } }
+    #endif
+
     /// Поднимает движок один раз и возвращает готовый к работе узел.
-    private static func prepare(format: AVAudioFormat) -> AVAudioPlayerNode? {
+    private static func readyPlayer() -> AVAudioPlayerNode? {
+        dispatchPrecondition(condition: .onQueue(queue))
         if let engine, let player, engine.isRunning { return player }
+        guard let format else { return nil }
         let engine = AVAudioEngine()
         let player = AVAudioPlayerNode()
         engine.attach(player)
@@ -120,6 +160,17 @@ enum Chime {
         Self.engine = engine
         Self.player = player
         return player
+    }
+
+    /// Синтезирует буфер один раз на вид отсчёта и держит его дальше.
+    private static func readyBuffer(kind: Kind) -> AVAudioPCMBuffer? {
+        dispatchPrecondition(condition: .onQueue(queue))
+        if let ready = buffers[kind] { return ready }
+        guard let format,
+              let made = makeBuffer(notes: kind == .focus ? focusNotes : restNotes,
+                                    format: format) else { return nil }
+        buffers[kind] = made
+        return made
     }
 
     /// Синтезирует арпеджио. Каждая нота — основной тон плюс тихая октава

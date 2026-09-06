@@ -200,7 +200,7 @@ enum Accent: CaseIterable {
 }
 
 /// Зачем запущен отсчёт. От этого зависит и цвет полосы, и что будет по звонку.
-enum Kind: Equatable {
+enum Kind: Hashable {
     case focus
     case rest
 
