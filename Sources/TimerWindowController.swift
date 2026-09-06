@@ -843,16 +843,26 @@ enum ScreenCorner {
     case topLeft, topRight, bottomLeft, bottomRight
 }
 
-/// Окно, которое во время перетаскивания прилипает к краям и углам экрана
-/// и никогда не выходит за его видимую область.
+/// Окно, которое во время перетаскивания прилипает к углам экрана и никогда
+/// не выходит за его границы.
 ///
-/// `constrainFrameRect(_:to:)` — единственная точка, через которую AppKit
-/// вообще пропускает рамку окна во время интерактивного перетаскивания,
-/// поэтому и прилипание, и ограничение делаются прямо здесь, а не подгонкой
-/// после факта.
+/// Перетаскивание здесь своё, а не `isMovableByWindowBackground`. Системное
+/// таскание за фон окна уходит в оконный сервер: тот двигает окно мимо AppKit,
+/// `constrainFrameRect(_:to:)` при этом не вызывается ни разу, а сам сервер
+/// не пускает рамку под меню-бар. Из-за этого пилюля упиралась в невидимую
+/// преграду — полосу меню (33 пт) плюс своё поле под тень (20 пт) — и до
+/// физического угла экрана не доходила, а прилипание с квадратным углом
+/// срабатывали только при программных перестановках окна.
+///
+/// Свой цикл двигает окно через `setFrameOrigin`, который никаких ограничений
+/// не накладывает: угол экрана достижим, и прилипание работает живьём.
 final class SnappingWindow: NSWindow {
     /// Расстояние до края экрана, ближе которого окно прилипает к нему.
     static let snapDistance: CGFloat = 24
+
+    /// Насколько нужно увести мышь, чтобы нажатие стало перетаскиванием.
+    /// Без порога окно прыгало бы в угол от прилипания на обычном клике.
+    private static let dragThreshold: CGFloat = 3
 
     /// Прозрачное поле вокруг видимой пилюли — место под мягкую тень.
     /// Прилипает и упирается в границы экрана именно видимая часть, а не эта
@@ -864,19 +874,65 @@ final class SnappingWindow: NSWindow {
     /// в том числе с `nil`, когда окно отлипает от угла.
     var onCornerChange: ((ScreenCorner?) -> Void)?
 
+    /// Последний сообщённый угол — чтобы не перерисовывать скругление и тень
+    /// на каждом событии перетаскивания: угол меняется несколько раз за перенос,
+    /// а событий приходят сотни. Внешний слой отделяет «ещё не сообщали»
+    /// от «сообщали, что угла нет».
+    private var reportedCorner: ScreenCorner??
+
     // У `.borderless` окна оба по умолчанию `false` — тогда первый клик по
     // кнопке внутри только активирует окно, а не нажимает её.
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 
+    /// Перетаскивание окна за фон. Нажатие доходит сюда по цепочке ответчиков
+    /// от вида, который его не разобрал, и цикл крутится до отпускания кнопки —
+    /// ровно тот уговор, на который опирается клик по табло: управление
+    /// вернулось, а окно стоит на месте — значит, это был клик.
+    override func mouseDown(with event: NSEvent) {
+        let start = NSEvent.mouseLocation
+        // Захват считается один раз, от начала: если брать смещение от каждого
+        // прошлого положения, окно уползает от курсора на каждом прилипании.
+        let grab = NSPoint(x: frame.origin.x - start.x, y: frame.origin.y - start.y)
+        var dragging = false
+
+        while let next = NSApp.nextEvent(matching: [.leftMouseUp, .leftMouseDragged],
+                                         until: .distantFuture,
+                                         inMode: .eventTracking, dequeue: true) {
+            if next.type == .leftMouseUp { break }
+
+            let now = NSEvent.mouseLocation
+            if !dragging {
+                guard abs(now.x - start.x) > Self.dragThreshold
+                        || abs(now.y - start.y) > Self.dragThreshold else { continue }
+                dragging = true
+            }
+
+            let moved = NSRect(origin: NSPoint(x: now.x + grab.x, y: now.y + grab.y),
+                               size: frame.size)
+            // Экран берётся по курсору, а не по окну: иначе на двух мониторах
+            // окно липнет к углам того экрана, с которого его уже увели.
+            let under = NSScreen.screens.first { $0.frame.contains(now) } ?? screen
+            setFrameOrigin(settle(moved, on: under).origin)
+        }
+    }
+
+    /// Программные перестановки окна (`setFrame`, восстановление места) идут
+    /// через ту же подгонку, что и живое перетаскивание.
+    ///
+    /// Не через `super`: он поджимает рамку под меню-бар и Док, и до
+    /// физического угла экрана она уже не дотягивается.
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
-        // Не через `super`: у титульного окна он сам поджимает рамку под меню-бар,
-        // и до физического угла экрана она уже не дотягивается — окно застревает
-        // на границе обычных окон, а не в углу экрана. Дальше — только свой расчёт.
+        settle(frameRect, on: screen ?? self.screen)
+    }
+
+    /// Прилипание к углу, упор в границы экрана и пересчёт того, каким углом
+    /// окно сейчас прижато.
+    private func settle(_ frameRect: NSRect, on screen: NSScreen?) -> NSRect {
         // Именно `frame`, а не `visibleFrame`: последний обрезан под меню и Док,
         // и его край совпадает с краем обычного окна на весь экран — из-за этого
         // казалось, что окно липнет к чужому окну, а не к самому экрану.
-        guard let target = (screen ?? self.screen)?.frame else { return frameRect }
+        guard let target = screen?.frame else { return frameRect }
 
         var visible = frameRect.insetBy(dx: contentInset, dy: contentInset)
 
@@ -921,7 +977,10 @@ final class SnappingWindow: NSWindow {
         case (_, true, true, _): corner = .bottomRight
         default: corner = nil
         }
-        onCornerChange?(corner)
+        if reportedCorner != .some(corner) {
+            reportedCorner = .some(corner)
+            onCornerChange?(corner)
+        }
 
         return visible.insetBy(dx: -contentInset, dy: -contentInset)
     }
@@ -1002,10 +1061,9 @@ final class TimerWindowController: NSWindowController {
         let margin = Self.shadowMargin
         let outerSize = NSSize(width: TimerWindowController.windowSize.width + margin * 2,
                                height: TimerWindowController.windowSize.height + margin * 2)
-        // `.borderless`, а не `.titled`: у titled-окна WindowServer при живом
-        // перетаскивании мышью отдельно от `constrainFrameRect` не пускает
-        // рамку под меню-бар, даже когда сама полоса заголовка не видна —
-        // это ограничение не в этом коде, обойти его можно только так.
+        // `.borderless`, а не `.titled`: у titled-окна оконный сервер держит
+        // полосу заголовка ниже меню-бара даже тогда, когда она не видна,
+        // и своим циклом перетаскивания это уже не обойти.
         let window = SnappingWindow(
             contentRect: NSRect(origin: .zero, size: outerSize),
             styleMask: [.borderless],
@@ -1018,10 +1076,20 @@ final class TimerWindowController: NSWindowController {
         window.onCornerChange = { [weak self] corner in self?.updateCornerRadii(for: corner) }
 
         // Ключевая строка: окно живёт над обычными окнами и видно во всех пространствах.
-        window.level = .floating
+        //
+        // Уровень именно `.statusBar` (25), а не `.floating` (3): Док лежит на
+        // уровне 20, меню-бар на 24, и «поверх всех окон» на третьем уровне
+        // означало «поверх обычных окон, но под Доком и меню». Пилюля, задвинутая
+        // в нижний угол, пряталась за Доком, а в верхнем её срезал меню-бар —
+        // тот самый угол, до которого её и тащат. Выше 25 забираться незачем:
+        // всплывающие меню (101) и системные окна должны оставаться сверху.
+        window.level = .statusBar
         window.collectionBehavior.insert(.canJoinAllSpaces)
 
-        window.isMovableByWindowBackground = true
+        // Не `isMovableByWindowBackground`: системное таскание за фон уходит в
+        // оконный сервер и не пускает окно под меню-бар. Окно двигает `SnappingWindow`
+        // своим циклом — см. комментарий у класса.
+
         // Иначе система восстанавливает прошлое место окна уже после запуска
         // и перетирает то, которое посчитал `placeWindow()`.
         window.isRestorable = false
@@ -1038,7 +1106,10 @@ final class TimerWindowController: NSWindowController {
         window.contentView = frameView
         setUpShadow(margin: margin)
         window.setContentSize(outerSize)
-        window.setFrameAutosaveName(Self.frameName)
+        // Имя для запоминания места выдаётся не здесь, а в `placeWindow()`:
+        // AppKit начинает сохранять место сразу, как имя выдано, и центрирование
+        // строкой ниже перетирало место, оставленное в прошлый раз, — читать
+        // потом было уже нечего.
         Self.centerOnMainDisplay(window)
 
         engine.onFinish = { [weak self] overdue in self?.handleFinish(overdue: overdue) }
@@ -1055,7 +1126,8 @@ final class TimerWindowController: NSWindowController {
     private static let frameName = "PimerWindow"
 
     /// Ставит окно туда, где его оставили, — но только если это место всё ещё
-    /// на экране. Иначе окно уходит в середину экрана.
+    /// на экране. Иначе окно уходит в середину экрана. Здесь же окну выдаётся
+    /// имя, под которым оно дальше запоминает своё место.
     ///
     /// Вызывается после показа окна, а не из `init`. И считает середину по
     /// `CGDisplayBounds`, а не по `NSScreen`: у приложения без иконки в доке
@@ -1064,16 +1136,32 @@ final class TimerWindowController: NSWindowController {
     func placeWindow() {
         guard let window else { return }
         let restored = window.setFrameUsingName(Self.frameName)
-        let area = Self.usableArea()
-        if !(restored && area.insetBy(dx: -1, dy: -1).contains(window.frame)) {
+        if !(restored && Self.isOnScreen(window)) {
+            let area = Self.usableArea()
             window.setFrameOrigin(NSPoint(x: area.midX - window.frame.width / 2,
                                           y: area.midY - window.frame.height / 2))
         }
+        // Запоминать место окно начинает только теперь — когда прошлое уже
+        // прочитано и разобрано.
+        window.setFrameAutosaveName(Self.frameName)
+
         // `setFrameOrigin` не проходит через `constrainFrameRect`, поэтому угол,
         // сохранённый с прошлого запуска, синхронизируется отдельно, вручную.
         if let snapping = window as? SnappingWindow {
             _ = snapping.constrainFrameRect(window.frame, to: window.screen)
         }
+    }
+
+    /// Лежит ли видимая пилюля целиком на каком-нибудь экране.
+    ///
+    /// Считается по `frame` экрана, а не по `visibleFrame`: окно доходит до
+    /// физических углов, и место, оставленное в углу под меню-баром или Доком,
+    /// по `visibleFrame` считалось бы потерянным — окно уезжало бы из угла
+    /// в середину экрана при каждом запуске.
+    private static func isOnScreen(_ window: NSWindow) -> Bool {
+        let inset = (window as? SnappingWindow)?.contentInset ?? 0
+        let pill = window.frame.insetBy(dx: inset, dy: inset)
+        return NSScreen.screens.contains { $0.frame.insetBy(dx: -1, dy: -1).contains(pill) }
     }
 
     /// Ставит окно в середину главного дисплея. Считает по Core Graphics:

@@ -1,11 +1,15 @@
 import Foundation
 import CoreGraphics
 
-/// Проверка Ф1.4 / крит. 7: окно приложения лежит на слое выше обычных окон.
+/// Проверка Ф1.4 / крит. 7: окно приложения лежит выше обычных окон и выше Дока.
 ///
 /// Окно ищется по pid запущенного процесса, а не по имени: имя делало проверку
 /// зелёной от любого чужого «Timer» — забытого процесса прошлого прогона, копии
 /// в /Applications или второго чекаута.
+///
+/// Сравнение с Доком тут не для полноты: проверка «слой > 0» была зелёной на
+/// уровне `.floating` (3), а Док лежит на 20 — окно, задвинутое в нижний угол,
+/// пряталось за Доком, и тест этого не видел.
 @main
 enum WindowLevelCheck {
     static func main() {
@@ -33,20 +37,28 @@ enum WindowLevelCheck {
         }
 
         let ordinary = windows.first { $0.pid != pid && $0.layer == 0 }
+        let dock = windows.filter { $0.owner == "Dock" }.max(by: { $0.layer < $1.layer })
         print("   слой окна «\(target.owner)» (pid \(pid)): \(target.layer)")
         if let ordinary { print("   слой обычного окна «\(ordinary.owner)»: \(ordinary.layer)") }
+        if let dock { print("   слой Дока: \(dock.layer)") }
 
         guard ordinary != nil else {
             print("✗ Ф1.4 на экране нет ни одного обычного окна — сравнивать не с чем")
             exit(1)
         }
 
-        if target.layer > 0 {
-            print("✓ Ф1.4 окно лежит выше обычных окон (слой \(target.layer) > 0)")
-            exit(0)
-        } else {
+        guard target.layer > 0 else {
             print("✗ Ф1.4 окно на обычном слое \(target.layer) — «поверх всех окон» не работает")
             exit(1)
         }
+
+        // Док может быть спрятан — тогда его окна нет в списке и сравнивать не с чем.
+        if let dock, target.layer <= dock.layer {
+            print("✗ Ф1.4 окно на слое \(target.layer), Док на \(dock.layer) — пилюля прячется за Доком")
+            exit(1)
+        }
+
+        print("✓ Ф1.4 окно лежит выше обычных окон и Дока (слой \(target.layer))")
+        exit(0)
     }
 }

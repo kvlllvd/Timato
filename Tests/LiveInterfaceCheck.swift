@@ -145,7 +145,11 @@ enum LiveInterfaceCheck {
               onScreen(clock) && button("25 min").map(onScreen) != true)
         check("К1", "на табло 25:00", face() == "25:00", "получено «\(face())»")
         check("К1", "полоса видна и пуста", onScreen(bar) && filled() < 0.05, "залито \(filled())")
-        check("К7", "окно поверх обычных окон", window.level == .floating, "\(window.level.rawValue)")
+        // Сравнение с Доком, а не с конкретным уровнем: «поверх всех окон» на
+        // `.floating` (3) было зелёным, пока пилюля пряталась за Доком (20).
+        let dockLevel = Int(CGWindowLevelForKey(.dockWindow))
+        check("К7", "окно поверх обычных окон и Дока", window.level.rawValue > dockLevel,
+              "уровень \(window.level.rawValue), Док \(dockLevel)")
         check("К1", "три кнопки отсчёта на месте",
               ["Pause", "Finish now", "Stop"].allSatisfy { button($0).map(onScreen) == true })
 
@@ -406,6 +410,83 @@ enum LiveInterfaceCheck {
               ["Pause", "Finish now", "Stop"].allSatisfy { button($0).map(onScreen) == true })
         button("Stop")?.performClick(nil)
         pump()
+
+        print("\nУ · пилюля доходит до физических углов экрана")
+        // Ловушка, ради которой эта проверка и написана: «поверх всех окон» и
+        // прилипание к углу могут быть на месте, а окно всё равно упирается
+        // в невидимую преграду — полосу меню сверху и Док снизу. Границей
+        // считается `frame` экрана, а не `visibleFrame`.
+        if let screen = window.screen ?? NSScreen.main {
+            let inset = (window as? SnappingWindow)?.contentInset ?? 0
+            let pillSize = TimerWindowController.windowSize
+            let saved = window.frame
+
+            /// Ставит окно так, чтобы видимая пилюля оказалась в точке `origin`.
+            func placePill(at origin: NSPoint) {
+                window.setFrame(NSRect(origin: NSPoint(x: origin.x - inset, y: origin.y - inset),
+                                       size: window.frame.size), display: true)
+                pump(0.2)
+            }
+            /// Видимая пилюля без поля под тень.
+            func pill() -> NSRect { window.frame.insetBy(dx: inset, dy: inset) }
+
+            // Подводим почти к углу — остаток окно должно пройти прилипанием.
+            placePill(at: NSPoint(x: screen.frame.maxX - pillSize.width - 10,
+                                  y: screen.frame.maxY - pillSize.height - 10))
+            check("У", "прилипла к верхнему правому углу экрана",
+                  abs(pill().maxX - screen.frame.maxX) < 0.5
+                      && abs(pill().maxY - screen.frame.maxY) < 0.5,
+                  "пилюля \(pill()), экран \(screen.frame)")
+            check("У", "верх пилюли выше полосы меню",
+                  pill().maxY > screen.visibleFrame.maxY,
+                  "верх \(pill().maxY), видимая область кончается на \(screen.visibleFrame.maxY)")
+            check("У", "правый верхний угол стал квадратным", root.cornerRadii.topRight == 0,
+                  "радиус \(root.cornerRadii.topRight)")
+
+            placePill(at: NSPoint(x: screen.frame.minX + 10, y: screen.frame.minY + 10))
+            check("У", "прилипла к нижнему левому углу экрана",
+                  abs(pill().minX - screen.frame.minX) < 0.5
+                      && abs(pill().minY - screen.frame.minY) < 0.5,
+                  "пилюля \(pill()), экран \(screen.frame)")
+            check("У", "низ пилюли ниже Дока", pill().minY < screen.visibleFrame.minY,
+                  "низ \(pill().minY), видимая область начинается с \(screen.visibleFrame.minY)")
+            check("У", "левый нижний угол стал квадратным", root.cornerRadii.bottomLeft == 0,
+                  "радиус \(root.cornerRadii.bottomLeft)")
+
+            // Вдали от углов пилюля снова скруглена вся.
+            placePill(at: NSPoint(x: screen.frame.midX, y: screen.frame.midY))
+            check("У", "вдали от углов скругление вернулось", root.cornerRadii.bottomLeft > 0)
+
+            window.setFrame(saved, display: true)
+            pump(0.2)
+        } else {
+            check("У", "экран найден", false, "NSScreen недоступен")
+        }
+
+        print("\nП · окно запоминает своё место")
+        // Ловушка: имя для автосохранения выдавалось окну до центрирования при
+        // сборке, и первое же программное перемещение затирало место, оставленное
+        // в прошлый раз. Место «восстанавливалось» — из значения, записанного
+        // секунду назад тем же запуском.
+        let frameKey = "NSWindow Frame " + (window.frameAutosaveName.isEmpty ? "PimerWindow"
+                                                                             : window.frameAutosaveName)
+        check("П", "окну выдано имя для запоминания места", !window.frameAutosaveName.isEmpty,
+              "имя «\(window.frameAutosaveName)»")
+        let before = window.frame
+        let moved = NSRect(origin: NSPoint(x: 320, y: 240), size: window.frame.size)
+        window.setFrame(moved, display: true)
+        pump(0.3)
+        let saved = UserDefaults.standard.string(forKey: frameKey) ?? ""
+        let numbers = saved.split(separator: " ").compactMap { Double($0) }
+        check("П", "новое место записано в настройки",
+              numbers.count >= 2 && abs(numbers[0] - window.frame.origin.x) < 1
+                  && abs(numbers[1] - window.frame.origin.y) < 1,
+              "в настройках «\(saved)», окно на \(window.frame.origin)")
+        // Место окна теперь и правда переживает запуски, поэтому проверка обязана
+        // вернуть окно на место: иначе каждый прогон тестов утаскивал бы пилюлю
+        // пользователя туда, где её оставил последний тест.
+        window.setFrame(before, display: true)
+        pump(0.3)
 
         print("\nК8 · помидор в строке меню")
         let statusImage = TomatoIcon.statusBarImage()
