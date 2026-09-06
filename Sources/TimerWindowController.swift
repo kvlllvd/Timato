@@ -294,6 +294,17 @@ final class PillButton: NSButton {
 
     override func mouseEntered(with event: NSEvent) { hovered = true; redraw() }
     override func mouseExited(with event: NSEvent) { hovered = false; redraw() }
+
+    /// Трекер таскают за любое место, и кнопки не исключение: увели мышь —
+    /// это перенос окна, отпустили на месте — обычное нажатие.
+    ///
+    /// Обычный цикл нажатия у `NSButton` свой и события отпускания нам уже не
+    /// оставляет, поэтому действие после клика шлём сами.
+    override func mouseDown(with event: NSEvent) {
+        guard let snapping = window as? SnappingWindow else { return super.mouseDown(with: event) }
+        guard !snapping.dragIfMoved(after: event) else { return }
+        performClick(nil)
+    }
 }
 
 // MARK: - Полоса прогресса
@@ -315,6 +326,15 @@ final class ProgressBar: NSView {
 
     /// Цвета трека и заливки берутся из состояния окна целиком.
     private var look: Look = Palette.focus
+
+    /// Где полоса стоит, когда никуда не едет.
+    private var frozenFraction: CGFloat = 0
+    /// Едущая полоса: откуда поехала, когда и сколько ехать. Анимация задана
+    /// в точках, а ширина окна меняется на ходу — по этим трём числам полосу
+    /// и пересобирают на новой ширине, не сбивая ход.
+    private var run: (from: CGFloat, start: CFTimeInterval, duration: TimeInterval)?
+    /// Ширина, под которую посчитана нынешняя анимация.
+    private var laidOutWidth: CGFloat = 0
 
     /// Перекрашивает полосу под состояние окна, не сбивая ход анимации.
     func apply(look: Look) {
@@ -341,13 +361,39 @@ final class ProgressBar: NSView {
 
     override func layout() {
         super.layout()
+        // Без отключения неявных анимаций слои тянутся за новой шириной сами
+        // и отстают от окна на каждом кадре свёртывания.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         let radius = bounds.height / 2
         track.frame = bounds
         track.cornerRadius = radius
         fill.frame = bounds
         fill.cornerRadius = radius
         reveal.cornerRadius = radius
-        reveal.frame = CGRect(x: 0, y: 0, width: currentWidth, height: bounds.height)
+        if bounds.width == laidOutWidth {
+            reveal.frame = CGRect(x: 0, y: 0, width: currentWidth, height: bounds.height)
+        } else {
+            // Ширина сменилась — окно свернулось или развернулось. Анимация
+            // задана в точках, и на новой ширине полоса ехала бы к старому
+            // концу, мимо края окна: пересобираем её с той же доли.
+            laidOutWidth = bounds.width
+            if let run {
+                let passed = CACurrentMediaTime() - run.start
+                show(fraction: fractionNow, animatingFor: max(0, run.duration - passed))
+            } else {
+                freeze(fraction: frozenFraction)
+            }
+        }
+        CATransaction.commit()
+    }
+
+    /// Какая доля залита прямо сейчас. Считается по часам, а не по слою:
+    /// в момент смены ширины презентационный слой мерит уже от новой рамки.
+    private var fractionNow: CGFloat {
+        guard let run, run.duration > 0 else { return frozenFraction }
+        let passed = min(1, max(0, (CACurrentMediaTime() - run.start) / run.duration))
+        return run.from + (1 - run.from) * CGFloat(passed)
     }
 
     private func applyColors() {
@@ -367,6 +413,8 @@ final class ProgressBar: NSView {
     func show(fraction: CGFloat, animatingFor remaining: TimeInterval) {
         let clamped = max(0, min(1, fraction))
         reveal.removeAnimation(forKey: Self.animationKey)
+        frozenFraction = clamped
+        run = remaining > 0 ? (from: clamped, start: CACurrentMediaTime(), duration: remaining) : nil
 
         let from = CGRect(x: 0, y: 0, width: bounds.width * clamped, height: bounds.height)
         reveal.frame = from
@@ -386,8 +434,10 @@ final class ProgressBar: NSView {
     /// Замирает там, где полоса оказалась: пауза, сброс, конец отсчёта.
     func freeze(fraction: CGFloat) {
         reveal.removeAnimation(forKey: Self.animationKey)
-        reveal.frame = CGRect(x: 0, y: 0, width: bounds.width * max(0, min(1, fraction)),
-                              height: bounds.height)
+        let clamped = max(0, min(1, fraction))
+        run = nil
+        frozenFraction = clamped
+        reveal.frame = CGRect(x: 0, y: 0, width: bounds.width * clamped, height: bounds.height)
     }
 }
 
@@ -463,8 +513,13 @@ final class SegmentsView: NSView {
     }
 
     /// `super` не зовём: иначе нажатие уйдёт окну и вместо переключения
-    /// начнётся перетаскивание.
-    override func mouseDown(with event: NSEvent) { onClick?() }
+    /// сразу началось бы перетаскивание. Но и ряд черточек — часть трекера,
+    /// за которую его можно утащить: перенос отделяется от клика тем же
+    /// порогом, что и на кнопках.
+    override func mouseDown(with event: NSEvent) {
+        if let snapping = window as? SnappingWindow, snapping.dragIfMoved(after: event) { return }
+        onClick?()
+    }
 
     override func accessibilityLabel() -> String? { "Progress" }
     override func accessibilityRole() -> NSAccessibility.Role? { .button }
@@ -646,18 +701,14 @@ final class FlipClockView: NSView {
     var onClick: (() -> Void)?
 
     /// Клик по табло перебирает цвет свечения — но тащить окно за цифры
-    /// по-прежнему можно.
-    ///
-    /// `super.mouseDown` отдаёт нажатие окну, и то, если это перетаскивание,
-    /// прокручивает свой цикл событий до отпускания кнопки. Значит, к моменту
-    /// возврата уже видно, уехало окно или стояло: сдвинулось — это было
-    /// перетаскивание, осталось на месте — это клик. Отличить их иначе нечем:
-    /// событий отпускания вид в этом случае не получает.
+    /// по-прежнему можно: перенос отделяется от клика тем же порогом, что
+    /// и на кнопках с рядом черточек.
     override func mouseDown(with event: NSEvent) {
-        guard onClick != nil else { return super.mouseDown(with: event) }
-        let origin = window?.frame.origin
-        super.mouseDown(with: event)
-        if window?.frame.origin == origin { onClick?() }
+        guard let onClick, let snapping = window as? SnappingWindow else {
+            return super.mouseDown(with: event)
+        }
+        guard !snapping.dragIfMoved(after: event) else { return }
+        onClick()
     }
 
     /// Показывает время. Пока длина строки не меняется, разряды те же самые и
@@ -721,7 +772,6 @@ func roundedPath(in rect: NSRect, radii: CornerRadii) -> CGPath {
 /// Заливка живёт в `CAShapeLayer`, а не в `draw(_:)`: перекрасить нарисованное
 /// вручную можно только скачком, а слой сам интерполирует цвет между кадрами.
 final class RootView: NSView {
-    private static let radius: CGFloat = 8
 
     private let backdrop = CAShapeLayer()
     /// Свечение из макета: круг радиусом 181 с центром выше левого верхнего
@@ -737,13 +787,23 @@ final class RootView: NSView {
 
     override var isFlipped: Bool { true }
 
-    var cornerRadii: CornerRadii = (radius, radius, radius, radius) {
+    var cornerRadii: CornerRadii = (pillCornerRadius, pillCornerRadius,
+                                    pillCornerRadius, pillCornerRadius) {
         didSet { updatePath() }
     }
+
+    /// Курсор вошёл на пилюлю или ушёл с неё. Само событие ничего не решает:
+    /// окно по нему только пересчитывает, каким ему сейчас быть.
+    var onHoverChange: (() -> Void)?
+    private var hoverArea: NSTrackingArea?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
+        // Обрезка по своим границам: в ёмком виде кнопки отсчёта остаются на
+        // местах из макета и уезжают за правый край окна — без обрезки от них
+        // торчала бы полоска рядом с пилюлей.
+        layer?.masksToBounds = true
         backdrop.fillColor = Palette.focus.backdrop.cgColor
         glow.type = .radial
         // Круг, а не эллипс: конец градиента в углу квадратной рамки слоя.
@@ -761,6 +821,10 @@ final class RootView: NSView {
 
     override func layout() {
         super.layout()
+        // Неявные анимации отключены: ширина окна меняется на ходу, и заливка
+        // с маской обязаны идти с ним кадр в кадр, а не догонять его с задержкой.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         backdrop.frame = bounds
         glow.frame = Self.glowFrame
         // Своя копия маски: одну и ту же нельзя отдать двум слоям.
@@ -768,7 +832,25 @@ final class RootView: NSView {
         flash.frame = bounds
         flash.mask = maskLayer()
         updatePath()
+        CATransaction.commit()
     }
+
+    /// Курсор на пилюле. Событие приходит и когда окно уезжает из-под курсора,
+    /// поэтому решение принимает не оно, а `TimerWindowController`.
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        // `.inVisibleRect` — область держится за границы вида сама: ширина окна
+        // меняется на ходу, и пересчитывать прямоугольник вручную было бы нечем.
+        let area = NSTrackingArea(rect: .zero,
+                                  options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                  owner: self)
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) { onHoverChange?() }
+    override func mouseExited(with event: NSEvent) { onHoverChange?() }
 
     private func updatePath() {
         backdrop.path = roundedPath(in: bounds, radii: cornerRadii)
@@ -843,6 +925,33 @@ enum ScreenCorner {
     case topLeft, topRight, bottomLeft, bottomRight
 }
 
+/// Стороны экрана, которых касается видимая пилюля. `top` и `bottom` названы
+/// так, как их видит человек: `top` — верхняя кромка экрана.
+struct ScreenEdges: OptionSet {
+    let rawValue: Int
+
+    static let left = ScreenEdges(rawValue: 1 << 0)
+    static let right = ScreenEdges(rawValue: 1 << 1)
+    static let top = ScreenEdges(rawValue: 1 << 2)
+    static let bottom = ScreenEdges(rawValue: 1 << 3)
+}
+
+/// Скругление углов пилюли из макета — одно на все четыре, пока окно не
+/// прижато к кромке экрана.
+let pillCornerRadius: CGFloat = 8
+
+/// Скругление углов пилюли по тому, каких сторон экрана она касается.
+///
+/// Скруглён только тот угол, обе стороны которого лежат внутри экрана. Угол,
+/// сошедшийся на кромке, обязан быть прямым: скруглённый оставлял бы под собой
+/// щель, и окно не заполняло бы край экрана вплотную. Прижали окно верхом —
+/// прямыми становятся оба верхних угла, а не только тот, что в углу экрана.
+func cornerRadii(touching edges: ScreenEdges, radius: CGFloat) -> CornerRadii {
+    func corner(_ sides: ScreenEdges) -> CGFloat { edges.isDisjoint(with: sides) ? radius : 0 }
+    return (topLeft: corner([.top, .left]), topRight: corner([.top, .right]),
+            bottomRight: corner([.bottom, .right]), bottomLeft: corner([.bottom, .left]))
+}
+
 /// Окно, которое во время перетаскивания прилипает к углам экрана и никогда
 /// не выходит за его границы.
 ///
@@ -870,15 +979,19 @@ final class SnappingWindow: NSWindow {
     /// от настоящего угла экрана.
     var contentInset: CGFloat = 0
 
-    /// Вызывается с новым углом всякий раз, когда рамка окна ограничивается —
-    /// в том числе с `nil`, когда окно отлипает от угла.
-    var onCornerChange: ((ScreenCorner?) -> Void)?
+    /// Где курсор. Подменяется в живой проверке: настоящую мышь она не двигает,
+    /// а перенос окна проверить надо.
+    var pointerLocation: () -> NSPoint = { NSEvent.mouseLocation }
 
-    /// Последний сообщённый угол — чтобы не перерисовывать скругление и тень
-    /// на каждом событии перетаскивания: угол меняется несколько раз за перенос,
-    /// а событий приходят сотни. Внешний слой отделяет «ещё не сообщали»
-    /// от «сообщали, что угла нет».
-    private var reportedCorner: ScreenCorner??
+    /// Вызывается с новым набором сторон всякий раз, когда рамка окна
+    /// ограничивается — в том числе с пустым, когда окно отходит от края.
+    var onEdgesChange: ((ScreenEdges) -> Void)?
+
+    /// Последний сообщённый набор — чтобы не перерисовывать скругление и тень
+    /// на каждом событии перетаскивания: стороны меняются несколько раз за
+    /// перенос, а событий приходят сотни. `nil` — ещё ни разу не сообщали,
+    /// и первый же расчёт уйдёт наружу, даже если окно ничего не касается.
+    private var reportedEdges: ScreenEdges?
 
     // У `.borderless` окна оба по умолчанию `false` — тогда первый клик по
     // кнопке внутри только активирует окно, а не нажимает её.
@@ -890,7 +1003,7 @@ final class SnappingWindow: NSWindow {
     /// ровно тот уговор, на который опирается клик по табло: управление
     /// вернулось, а окно стоит на месте — значит, это был клик.
     override func mouseDown(with event: NSEvent) {
-        let start = NSEvent.mouseLocation
+        let start = pointerLocation()
         // Захват считается один раз, от начала: если брать смещение от каждого
         // прошлого положения, окно уползает от курсора на каждом прилипании.
         let grab = NSPoint(x: frame.origin.x - start.x, y: frame.origin.y - start.y)
@@ -901,7 +1014,7 @@ final class SnappingWindow: NSWindow {
                                          inMode: .eventTracking, dequeue: true) {
             if next.type == .leftMouseUp { break }
 
-            let now = NSEvent.mouseLocation
+            let now = pointerLocation()
             if !dragging {
                 guard abs(now.x - start.x) > Self.dragThreshold
                         || abs(now.y - start.y) > Self.dragThreshold else { continue }
@@ -915,6 +1028,28 @@ final class SnappingWindow: NSWindow {
             let under = NSScreen.screens.first { $0.frame.contains(now) } ?? screen
             setFrameOrigin(settle(moved, on: under).origin)
         }
+    }
+
+    /// Перенос окна, начатый с вида, который сам разбирает нажатия, — с кнопки
+    /// или с ряда черточек. Трекер берут за любое место, а не только за фон.
+    ///
+    /// `true` — это оказался перенос, и своё нажатие вид уже не выполняет.
+    /// `false` — мышь отпустили на месте, значит это был обычный клик.
+    func dragIfMoved(after event: NSEvent) -> Bool {
+        let start = pointerLocation()
+        while let next = NSApp.nextEvent(matching: [.leftMouseUp, .leftMouseDragged],
+                                         until: .distantFuture,
+                                         inMode: .eventTracking, dequeue: true) {
+            if next.type == .leftMouseUp { return false }
+            let now = pointerLocation()
+            guard abs(now.x - start.x) > Self.dragThreshold
+                    || abs(now.y - start.y) > Self.dragThreshold else { continue }
+            // Дальше окно ведёт свой обычный цикл переноса — с прилипанием
+            // к углам и упором в края экрана.
+            mouseDown(with: next)
+            return true
+        }
+        return false
     }
 
     /// Программные перестановки окна (`setFrame`, восстановление места) идут
@@ -965,21 +1100,18 @@ final class SnappingWindow: NSWindow {
         visible.origin.x = min(max(visible.origin.x, target.minX), target.maxX - visible.width)
         visible.origin.y = min(max(visible.origin.y, target.minY), target.maxY - visible.height)
 
-        // Итоговый угол — уже по факту положения, а не по порогу прилипания:
-        // так угол окна остаётся острым и тогда, когда окно просто утащили
-        // за пределы экрана и упёрли в угол ограничением, а не притяжением.
-        let corner: ScreenCorner?
-        switch (visible.minX == target.minX, visible.maxX == target.maxX,
-                visible.minY == target.minY, visible.maxY == target.maxY) {
-        case (true, _, _, true): corner = .topLeft
-        case (_, true, _, true): corner = .topRight
-        case (true, _, true, _): corner = .bottomLeft
-        case (_, true, true, _): corner = .bottomRight
-        default: corner = nil
-        }
-        if reportedCorner != .some(corner) {
-            reportedCorner = .some(corner)
-            onCornerChange?(corner)
+        // Стороны считаются по факту положения, а не по порогу прилипания:
+        // так углы остаются прямыми и тогда, когда окно просто утащили за
+        // пределы экрана и упёрли в край ограничением, а не притяжением.
+        // Каждая сторона — сама по себе: прижатым верхом окно бывает и без угла.
+        var edges: ScreenEdges = []
+        if visible.minX == target.minX { edges.insert(.left) }
+        if visible.maxX == target.maxX { edges.insert(.right) }
+        if visible.minY == target.minY { edges.insert(.bottom) }
+        if visible.maxY == target.maxY { edges.insert(.top) }
+        if reportedEdges != edges {
+            reportedEdges = edges
+            onEdgesChange?(edges)
         }
 
         return visible.insetBy(dx: -contentInset, dy: -contentInset)
@@ -988,12 +1120,38 @@ final class SnappingWindow: NSWindow {
 
 // MARK: - Контроллер окна
 
+/// Прозрачная рамка вокруг пилюли: в её поле лежит своя тень. Форму тени
+/// приходится пересчитывать на каждой раскладке — ширина окна меняется на ходу,
+/// когда трекер сворачивается в ёмкий вид, и застывшая тень выглядывала бы
+/// из-под свёрнутой пилюли.
+final class ShadowFrameView: NSView {
+    var onLayout: (() -> Void)?
+
+    override func layout() {
+        super.layout()
+        onLayout?()
+    }
+}
+
 /// Окно таймера: 294×86, без системной обвязки. Два экрана в одном окне —
 /// выбор (три варианта) и отсчёт (табло, пауза, «дальше», стоп, полоса остатка).
 final class TimerWindowController: NSWindowController {
 
     /// Размер видимой пилюли из макета.
     static let windowSize = NSSize(width: 294, height: 86)
+
+    /// Ширина ёмкого вида из макета: остаются табло и полоса остатка, кнопки
+    /// уезжают за правый край. Высота та же — сворачивается только ширина.
+    static let compactWidth: CGFloat = 136
+    /// Сколько длится свёртывание и развёртывание.
+    static let foldDuration: TimeInterval = 0.26
+    /// Сколько трекер ждёт, прежде чем свернуться. Разворачивается он сразу,
+    /// а сворачивается с паузой: курсор проходит по окну мимоходом десятки раз
+    /// за час, и окно, схлопывающееся ему вслед, дёргалось бы под рукой.
+    static let foldDelay: TimeInterval = 5
+    /// Кривая свёртывания: быстрый разгон и мягкая остановка — та же, по которой
+    /// съезжают цифры на табло, чтобы движения в окне были одного почерка.
+    static let foldCurve = CAMediaTimingFunction(controlPoints: 0.22, 0.9, 0.2, 1)
 
     /// Сторона круглой кнопки отсчёта из макета.
     static let controlSize: CGFloat = 40
@@ -1003,7 +1161,10 @@ final class TimerWindowController: NSWindowController {
     /// Прозрачное поле вокруг пилюли внутри рамки окна — своя, едва заметная
     /// тень рисуется в нём, а не системной тенью окна: у той нет регулировки
     /// силы, и убрать её мягче обычной не получалось.
-    private static let shadowMargin: CGFloat = 20
+    ///
+    /// Не `private`: живая проверка считает по нему ширину видимой пилюли —
+    /// у окна она всегда шире на два таких поля.
+    static let shadowMargin: CGFloat = 20
 
     private let engine = TimerEngine(duration: TimeInterval(Presets.focus[0] * 60))
     private var ticker: Timer?
@@ -1020,15 +1181,37 @@ final class TimerWindowController: NSWindowController {
     /// Итог для пункта «Summary», в половинках штриха. Наружу отдаются именно
     /// половинки, а не часы: пересчёт в часы — дело подписи, а не отсчёта.
     var completedHalves: Int { totalHalves }
-    /// Цвет свечения. Перебирается кликом по табло, по умолчанию красный из макета.
-    private var accent: Accent = .red
+    /// Цвет свечения. Перебирается кликом по табло.
+    private var accent: Accent = .default
+
+    /// Как трекер держит ширину: `Adaptive` — сворачивается без курсора,
+    /// `Always Full` — всегда полный. Переключается пунктами меню помидора.
+    var viewMode: ViewMode = .default {
+        didSet { syncWidth(animated: true) }
+    }
+
+    /// Ширина видимой пилюли прямо сейчас — полная из макета или ёмкая.
+    private var pillWidth: CGFloat = TimerWindowController.windowSize.width
+
+    /// Стороны экрана, которых окно сейчас касается. От них зависит и
+    /// скругление углов, и свёртывание: у окна, прижатого правым краем,
+    /// на месте остаётся правый край, а не левый.
+    private var touchedEdges: ScreenEdges = []
+
+    /// Где курсор. Подменяется в живой проверке: там мышь стоит там, где её
+    /// оставил человек, и сверять по ней ширину окна нельзя.
+    var pointerLocation: () -> NSPoint = { NSEvent.mouseLocation }
+
+    /// Отсчёт паузы перед свёртыванием. Живёт, только пока трекер ждёт;
+    /// вернулся курсор или сменилось состояние — снимается.
+    private var foldTimer: Timer?
     /// Показана ли кнопка сброса вместо кнопок выбора. Переключается кликом
     /// по ряду черточек: клик показывает кнопку, повторный клик убирает её.
     private var resetShown = false
 
     /// Настоящий contentView окна: прозрачная рамка с полем под тень.
     /// Пилюля (`root`) лежит внутри неё, отступив на `shadowMargin`.
-    private let frameView = NSView()
+    private let frameView = ShadowFrameView()
     private let root = RootView(frame: .zero)
 
     // Экран выбора
@@ -1073,7 +1256,11 @@ final class TimerWindowController: NSWindowController {
         super.init(window: window)
 
         window.contentInset = margin
-        window.onCornerChange = { [weak self] corner in self?.updateCornerRadii(for: corner) }
+        window.onEdgesChange = { [weak self] edges in self?.updateCornerRadii(touching: edges) }
+        // Тень пересобирается на каждой раскладке рамки: ширина окна меняется
+        // на ходу вместе с ёмким видом.
+        frameView.onLayout = { [weak self] in self?.updateShadowPath() }
+        root.onHoverChange = { [weak self] in self?.syncWidth(animated: true) }
 
         // Ключевая строка: окно живёт над обычными окнами и видно во всех пространствах.
         //
@@ -1114,13 +1301,16 @@ final class TimerWindowController: NSWindowController {
 
         engine.onFinish = { [weak self] overdue in self?.handleFinish(overdue: overdue) }
         applyScreen()
-        applyLook(animated: false)
+        applyState(animated: false)
         startTicker()
     }
 
     required init?(coder: NSCoder) { fatalError("не используется") }
 
-    deinit { ticker?.invalidate() }
+    deinit {
+        ticker?.invalidate()
+        foldTimer?.invalidate()
+    }
 
     /// Под каким именем окно запоминает своё место.
     private static let frameName = "PimerWindow"
@@ -1136,6 +1326,13 @@ final class TimerWindowController: NSWindowController {
     func placeWindow() {
         guard let window else { return }
         let restored = window.setFrameUsingName(Self.frameName)
+        // Из запомненного берём только место. Ширину задаёт нынешний вид окна:
+        // сохраниться она могла и ёмкой — тогда экран выбора открылся бы
+        // в обрезанной пилюле шириной 136.
+        window.setFrame(NSRect(origin: window.frame.origin,
+                               size: NSSize(width: pillWidth + Self.shadowMargin * 2,
+                                            height: Self.windowSize.height + Self.shadowMargin * 2)),
+                        display: false)
         if !(restored && Self.isOnScreen(window)) {
             let area = Self.usableArea()
             window.setFrameOrigin(NSPoint(x: area.midX - window.frame.width / 2,
@@ -1210,40 +1407,42 @@ final class TimerWindowController: NSWindowController {
         frameView.layer?.shadowOpacity = 0.18
         frameView.layer?.shadowRadius = 7
         frameView.layer?.shadowOffset = CGSize(width: 0, height: -2)
-        updateShadowPath(radii: root.cornerRadii, margin: margin)
+        updateShadowPath()
     }
 
-    /// Обнуляет скругление у угла, которым окно сейчас прижато к углу экрана, —
-    /// чтобы окно ровно заполняло его, без зазора под скруглением. Форма тени
-    /// обновляется вместе с ним, иначе она останется скруглённой под угол,
-    /// который уже стал острым.
-    private func updateCornerRadii(for corner: ScreenCorner?) {
-        let full: CGFloat = 8
-        let radii: CornerRadii
-        switch corner {
-        case .topLeft:     radii = (0, full, full, full)
-        case .topRight:    radii = (full, 0, full, full)
-        case .bottomRight: radii = (full, full, 0, full)
-        case .bottomLeft:  radii = (full, full, full, 0)
-        case nil:          radii = (full, full, full, full)
-        }
-        root.cornerRadii = radii
-        updateShadowPath(radii: radii, margin: Self.shadowMargin)
+    /// Обнуляет скругление у углов, сошедшихся на кромке экрана, — чтобы окно
+    /// заполняло край вплотную, без зазора под скруглением. Форма тени
+    /// обновляется вместе с ними, иначе она останется скруглённой под углом,
+    /// который уже стал прямым.
+    private func updateCornerRadii(touching edges: ScreenEdges) {
+        touchedEdges = edges
+        root.cornerRadii = cornerRadii(touching: edges, radius: pillCornerRadius)
+        updateShadowPath()
     }
 
     /// Путь тени — тот же прямоугольник, что рисует `root`, но в координатах
-    /// `frameView`, то есть сдвинутый на `margin`. Задан явно: у `frameView`
+    /// `frameView`, то есть сдвинутый на `shadowMargin`. Задан явно: у `frameView`
     /// нет своего непрозрачного содержимого, чтобы форму тени можно было
     /// вывести из него автоматически.
+    ///
+    /// Размер берётся из живой рамки, а не из макета: ширина окна меняется
+    /// вместе с ёмким видом, и на каждом кадре свёртывания она своя.
     ///
     /// `frameView`, в отличие от `root`, не перевёрнут (`isFlipped == false`),
     /// поэтому в его координатах верх и низ у `roundedPath` меняются местами —
     /// иначе квадратный угол тени оказывался бы не под тем углом пилюли.
-    private func updateShadowPath(radii: CornerRadii, margin: CGFloat) {
-        let visibleRect = NSRect(origin: NSPoint(x: margin, y: margin), size: TimerWindowController.windowSize)
+    private func updateShadowPath() {
+        let radii = root.cornerRadii
+        let visibleRect = frameView.bounds.insetBy(dx: Self.shadowMargin, dy: Self.shadowMargin)
+        guard visibleRect.width > 0, visibleRect.height > 0 else { return }
         let flipped: CornerRadii = (topLeft: radii.bottomLeft, topRight: radii.bottomRight,
                                     bottomRight: radii.topRight, bottomLeft: radii.topLeft)
+        // Без отключения неявной анимации тень тянется за окном с задержкой
+        // и на свёртывании отстаёт от пилюли на добрую четверть секунды.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         frameView.layer?.shadowPath = roundedPath(in: visibleRect, radii: flipped)
+        CATransaction.commit()
     }
 
     // MARK: - Сборка интерфейса
@@ -1255,6 +1454,14 @@ final class TimerWindowController: NSWindowController {
         // выбирать её руками незачем.
         presetButtons = Presets.minutes.map { minutes in
             PillButton(minutes: minutes, target: self, action: #selector(presetTapped(_:)))
+        }
+        // Кнопки выбора не держат ширину окна. Их ряд растянут от поля до поля,
+        // и своей шириной «25 min» + «55 min» задавал окну нижнюю границу в 164
+        // точки — ниже неё окно не сжималось, и ёмкий вид не доходил до 136.
+        // На экране выбора ничего не меняется: там ширину кнопкам всё равно
+        // раздаёт `fillEqually`, а не их содержимое.
+        for button in presetButtons {
+            button.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         }
 
         choiceStack.setViews(presetButtons, in: .center)
@@ -1300,9 +1507,12 @@ final class TimerWindowController: NSWindowController {
             clock.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: inset),
             clock.topAnchor.constraint(equalTo: root.topAnchor, constant: 18),
 
-            controlsStack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -inset),
+            // Ряд кнопок держится за левый край, а не за правый: в ёмком виде
+            // окно сужается до 136, и кнопки должны уехать за правый край
+            // целиком, а не сползти на табло. 150 — их место из макета:
+            // 294 − 16 (поле справа) − 128 (ширина ряда).
+            controlsStack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 150),
             controlsStack.topAnchor.constraint(equalTo: root.topAnchor, constant: inset),
-            controlsStack.leadingAnchor.constraint(greaterThanOrEqualTo: clock.trailingAnchor, constant: 8),
 
             // Экран выбора: три пилюли сверху, под ними ряд засечек по левому краю.
             choiceStack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: inset),
@@ -1376,7 +1586,7 @@ final class TimerWindowController: NSWindowController {
         kind = Kind.forMinutes(minutes)
         engine.start(seconds: TimeInterval(minutes * 60))
         applyScreen()
-        applyLook(animated: previous != kind)
+        applyState(animated: previous != kind)
         syncProgress()
         syncTicker()
     }
@@ -1395,6 +1605,93 @@ final class TimerWindowController: NSWindowController {
         // Свечение есть только у идущей работы — там же и живёт выбранный цвет.
         if look.glow != nil { look.glow = Palette.glow(accent) }
         return look
+    }
+
+    /// Приводит окно в согласие с состоянием: и цвета, и ширину. Зовётся везде,
+    /// где состояние поменялось, — тогда ёмкий вид и перекраска не разъезжаются.
+    private func applyState(animated: Bool) {
+        applyLook(animated: animated)
+        syncWidth(animated: animated)
+    }
+
+    /// Каким окну быть прямо сейчас — ёмким или полным.
+    private var wantsCompact: Bool {
+        isCompact(mode: viewMode, state: engine.state, kind: kind, hovered: pointerInside)
+    }
+
+    /// Курсор на пилюле. Считается по факту, а не по последнему событию мыши:
+    /// `mouseEntered` не приходит, если курсор уже стоял над окном к моменту,
+    /// когда отсчёт начался, — а решать надо и в этот момент тоже.
+    private var pointerInside: Bool {
+        guard let window, window.isVisible else { return false }
+        return window.frame.insetBy(dx: Self.shadowMargin, dy: Self.shadowMargin)
+            .contains(pointerLocation())
+    }
+
+    /// Сворачивает и разворачивает трекер. Ширина — единственное, что меняется:
+    /// табло и полоса стоят на своих местах из макета, кнопки уходят за правый
+    /// край и возвращаются оттуда же.
+    ///
+    /// Полный вид возвращается сразу, ёмкий — через `foldDelay`: рука с мышью
+    /// проходит над окном чаще, чем уходит от него насовсем.
+    func syncWidth(animated: Bool) {
+        guard wantsCompact else {
+            cancelFold()
+            setPillWidth(Self.windowSize.width, animated: animated)
+            return
+        }
+        // Без анимации сворачиваем сразу: так окно встаёт на место при первом
+        // показе, и так же его ставит живая проверка, которой ждать нечего.
+        guard animated else { return setPillWidth(Self.compactWidth, animated: false) }
+        scheduleFold()
+    }
+
+    /// Заводит паузу перед свёртыванием. Пока она идёт, второй раз не заводит:
+    /// `syncWidth` дёргается и тикером, четыре раза в секунду.
+    private func scheduleFold() {
+        guard pillWidth != Self.compactWidth, foldTimer == nil else { return }
+        let timer = Timer.scheduledTimer(withTimeInterval: Self.foldDelay, repeats: false) {
+            [weak self] _ in
+            guard let self else { return }
+            self.foldTimer = nil
+            // За пять секунд всё могло перемениться: курсор вернулся, отсчёт
+            // встал на паузу, человек выбрал `Always Full`.
+            guard self.wantsCompact else { return }
+            self.setPillWidth(Self.compactWidth, animated: true)
+        }
+        // Иначе пауза замирает, пока пользователь тащит окно или держит меню.
+        RunLoop.main.add(timer, forMode: .common)
+        foldTimer = timer
+    }
+
+    private func cancelFold() {
+        foldTimer?.invalidate()
+        foldTimer = nil
+    }
+
+    /// Меняет ширину видимой пилюли — с анимацией или сразу.
+    private func setPillWidth(_ target: CGFloat, animated: Bool) {
+        guard let window, target != pillWidth else { return }
+        pillWidth = target
+
+        var frame = window.frame
+        frame.size.width = target + Self.shadowMargin * 2
+        // У окна, прижатого к правому углу экрана, на месте остаётся правый
+        // край — иначе пилюля отлипала бы от угла и уезжала к середине.
+        // В остальных случаях стоит левый: по нему выровнено содержимое.
+        if touchedEdges.contains(.right) {
+            frame.origin.x = window.frame.maxX - frame.width
+        }
+
+        guard animated else {
+            window.setFrame(frame, display: true)
+            return
+        }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Self.foldDuration
+            context.timingFunction = Self.foldCurve
+            window.animator().setFrame(frame, display: true)
+        }
     }
 
     /// Перекрашивает окно целиком: фон, табло, кнопки, трек и полосу.
@@ -1453,7 +1750,7 @@ final class TimerWindowController: NSWindowController {
     private func clockTapped() {
         guard engine.isRunning, kind == .focus else { return }
         accent = accent.next
-        applyLook(animated: true)
+        applyState(animated: true)
     }
 
     /// Пауза и продолжение. На паузе окно уходит в серый (на отдыхе — в тёмно-зелёный):
@@ -1461,7 +1758,7 @@ final class TimerWindowController: NSWindowController {
     @objc private func pauseTapped() {
         engine.isRunning ? engine.pause() : engine.resume()
         refresh()
-        applyLook(animated: true)
+        applyState(animated: true)
         syncProgress()
         syncTicker()
     }
@@ -1477,7 +1774,7 @@ final class TimerWindowController: NSWindowController {
     @objc private func stopTapped() {
         engine.reset()
         applyScreen()
-        applyLook(animated: true)
+        applyState(animated: true)
         syncProgress()
         syncTicker()
     }
@@ -1495,7 +1792,7 @@ final class TimerWindowController: NSWindowController {
         } else {
             // Отдых кончился — окно возвращается к чёрному вместе с выбором.
             applyScreen()
-            applyLook(animated: true)
+            applyState(animated: true)
         }
         syncTicker()
         window?.orderFrontRegardless()
@@ -1524,6 +1821,10 @@ final class TimerWindowController: NSWindowController {
             guard let self else { return }
             self.engine.tick()
             if self.engine.state == .running { self.refresh() }
+            // Заодно страховка ёмкого вида: `mouseExited` до окна доходит не
+            // всегда — курсор мог уйти, пока сверху был Mission Control или
+            // чужое полноэкранное окно. Ширина уже нужная — вызов пустой.
+            self.syncWidth(animated: true)
         }
         // Иначе отсчёт замирает, пока пользователь тащит окно или держит меню открытым.
         RunLoop.main.add(ticker, forMode: .common)

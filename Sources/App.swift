@@ -31,6 +31,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var summaryItem: NSMenuItem?
     /// Пункт звука: один пункт на два состояния, заголовок переключается.
     private var muteItem: NSMenuItem?
+    /// Пункты вида трекера. Галочка стоит ровно на одном из них: вид у трекера
+    /// всегда какой-то один, «ни того ни другого» не бывает.
+    private var modeItems: [NSMenuItem] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Шрифт — до создания окна: интерфейс собирается уже с ним.
@@ -96,6 +99,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         muteItem = mute
 
         menu.addItem(.separator())
+
+        // Вид трекера — своей группой между звуком и действиями: это тоже
+        // состояние приложения, но выбирают здесь из двух, а не включают одно.
+        for mode in ViewMode.allCases {
+            let item = menu.addItem(withTitle: mode.title, action: #selector(chooseMode(_:)),
+                                    keyEquivalent: "")
+            item.target = self
+            item.representedObject = mode
+            modeItems.append(item)
+        }
+        syncModeItems()
+
+        menu.addItem(.separator())
         menu.addItem(withTitle: "Reset", action: #selector(resetProgress), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Guide", action: #selector(openGuide), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Quit", action: #selector(quit), keyEquivalent: "q").target = self
@@ -128,6 +144,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleMute() {
         Notifier.isMuted.toggle()
         muteItem?.title = Self.muteTitle(isMuted: Notifier.isMuted)
+    }
+
+    /// «Adaptive» / «Always Full» — как трекер держит ширину. Пункты работают
+    /// как переключатель: выбранный помечен галочкой, выбрать «ничего» нельзя.
+    @objc private func chooseMode(_ sender: NSMenuItem) {
+        guard let mode = sender.representedObject as? ViewMode else { return }
+        controller?.viewMode = mode
+        syncModeItems()
+    }
+
+    /// Ставит галочку на том пункте, чей вид у окна сейчас.
+    private func syncModeItems() {
+        let current = controller?.viewMode ?? .default
+        for item in modeItems {
+            item.state = (item.representedObject as? ViewMode) == current ? .on : .off
+        }
     }
 
     /// Закрыть окно. Приложение остаётся в строке меню, отсчёт продолжает идти,
@@ -174,5 +206,6 @@ extension AppDelegate: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         summaryItem?.title = Self.summaryTitle(halves: controller?.completedHalves ?? 0)
         muteItem?.title = Self.muteTitle(isMuted: Notifier.isMuted)
+        syncModeItems()
     }
 }

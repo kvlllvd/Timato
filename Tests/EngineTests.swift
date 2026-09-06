@@ -334,6 +334,35 @@ enum EngineTests {
                   "получено \(String(describing: Notifier.lateSuffix(600)))")
         }
 
+        // --- В --- когда трекер показывает ёмкий вид
+        do {
+            check("В", "Adaptive: идущий рабочий отсчёт без курсора сворачивается",
+                  isCompact(mode: .adaptive, state: .running, kind: .focus, hovered: false))
+            check("В", "Adaptive: под курсором вид всегда полный",
+                  !isCompact(mode: .adaptive, state: .running, kind: .focus, hovered: true))
+            check("В", "Adaptive: на паузе вид полный",
+                  !isCompact(mode: .adaptive, state: .paused, kind: .focus, hovered: false))
+            check("В", "Adaptive: на пятиминутке вид полный",
+                  !isCompact(mode: .adaptive, state: .running, kind: .rest, hovered: false))
+            check("В", "Adaptive: на экране выбора вид полный",
+                  !isCompact(mode: .adaptive, state: .idle, kind: .focus, hovered: false)
+                  && !isCompact(mode: .adaptive, state: .finished, kind: .focus, hovered: false))
+            check("В", "Always Full не сворачивается ни в одном состоянии",
+                  [TimerState.idle, .running, .paused, .finished].allSatisfy { state in
+                      [Kind.focus, .rest].allSatisfy { kind in
+                          [true, false].allSatisfy { hovered in
+                              !isCompact(mode: .alwaysFull, state: state, kind: kind, hovered: hovered)
+                          }
+                      }
+                  })
+            check("В", "в меню два вида, полный первым",
+                  ViewMode.allCases.count == 2
+                  && ViewMode.allCases.map(\.title) == ["Always Full", "Adaptive"],
+                  "\(ViewMode.allCases.map(\.title))")
+            check("В", "по умолчанию выбран полный вид", ViewMode.default == .alwaysFull,
+                  "\(ViewMode.default)")
+        }
+
         print("\n" + String(repeating: "─", count: 52))
         if failures.isEmpty {
             print("ЗЕЛЁНО · \(passed) проверок")

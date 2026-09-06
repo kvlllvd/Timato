@@ -84,6 +84,28 @@ enum LiveInterfaceCheck {
         pump()
 
         let root = descendants(RootView.self, of: content).first!
+        let controller = window.windowController as! TimerWindowController
+
+        // Место окна приходит из прошлого запуска — оно могло остаться и
+        // прижатым к краю экрана, где углы пилюли обязаны быть прямыми.
+        // Проверке нужна определённость: ставим окно в середину экрана.
+        if let screen = window.screen ?? NSScreen.main {
+            window.setFrame(NSRect(origin: NSPoint(x: screen.frame.midX - window.frame.width / 2,
+                                                   y: screen.frame.midY - window.frame.height / 2),
+                                   size: window.frame.size), display: true)
+            pump(0.2)
+        }
+
+        // Курсор у проверки свой: настоящая мышь стоит там, где её оставил
+        // человек, и от неё зависел бы ёмкий вид — а с ним ширина окна.
+        // По умолчанию держим «курсор на окне»: тогда трекер всегда полный,
+        // как и был до появления ёмкого вида, и остальные проверки не плывут.
+        var pointer = NSPoint(x: window.frame.midX, y: window.frame.midY)
+        controller.pointerLocation = { pointer }
+        /// Курсор далеко за пределами любого экрана — окну не на что реагировать.
+        let pointerAway = NSPoint(x: -10_000, y: -10_000)
+        /// Ширина видимой пилюли: у окна вокруг неё ещё поле под тень.
+        func pillWidth() -> CGFloat { window.frame.width - TimerWindowController.shadowMargin * 2 }
         let clock = descendants(FlipClockView.self, of: content).first!
         let bar = descendants(ProgressBar.self, of: content).first!
         let segments = descendants(SegmentsView.self, of: content).first!
@@ -349,17 +371,17 @@ enum LiveInterfaceCheck {
             let gradient = root.layer?.sublayers?.compactMap { $0 as? CAGradientLayer }.first
             return hex((gradient?.colors as? [CGColor])?.first)
         }
-        let cycle = [Palette.glow(.green), Palette.glow(.purple),
-                     Palette.glow(.blue), Palette.glow(.red)]
-        check("Ф7", "по умолчанию свечение красное", glowColor() == hex(Palette.glow(.red).cgColor),
-              glowColor())
+        let cycle = [Palette.glow(.purple), Palette.glow(.blue),
+                     Palette.glow(.red), Palette.glow(.green)]
+        check("Ф7", "по умолчанию свечение зелёное",
+              glowColor() == hex(Palette.glow(.green).cgColor), glowColor())
         var cycled = true
         for expected in cycle {
             clock.onClick?()
             pump()
             if glowColor() != hex(expected.cgColor) { cycled = false }
         }
-        check("Ф7", "клики по табло дают зелёный, фиолетовый, синий и снова красный", cycled,
+        check("Ф7", "клики по табло дают фиолетовый, синий, красный и снова зелёный", cycled,
               "остановились на \(glowColor())")
         button("Stop")?.performClick(nil)
         pump()
@@ -449,8 +471,11 @@ enum LiveInterfaceCheck {
             check("У", "верх пилюли выше полосы меню",
                   pill().maxY > screen.visibleFrame.maxY,
                   "верх \(pill().maxY), видимая область кончается на \(screen.visibleFrame.maxY)")
-            check("У", "правый верхний угол стал квадратным", root.cornerRadii.topRight == 0,
-                  "радиус \(root.cornerRadii.topRight)")
+            // Скругление остаётся только у того угла, обе стороны которого
+            // лежат внутри экрана. У пилюли в правом верхнем углу это левый
+            // нижний: остальные три сошлись на кромке.
+            check("У", "у верхнего правого угла экрана скруглён один угол — левый нижний",
+                  root.cornerRadii == (0, 0, 0, pillCornerRadius), "\(root.cornerRadii)")
 
             placePill(at: NSPoint(x: screen.frame.minX + 10, y: screen.frame.minY + 10))
             check("У", "прилипла к нижнему левому углу экрана",
@@ -459,12 +484,37 @@ enum LiveInterfaceCheck {
                   "пилюля \(pill()), экран \(screen.frame)")
             check("У", "низ пилюли ниже Дока", pill().minY < screen.visibleFrame.minY,
                   "низ \(pill().minY), видимая область начинается с \(screen.visibleFrame.minY)")
-            check("У", "левый нижний угол стал квадратным", root.cornerRadii.bottomLeft == 0,
-                  "радиус \(root.cornerRadii.bottomLeft)")
+            check("У", "у нижнего левого угла экрана скруглён один угол — правый верхний",
+                  root.cornerRadii == (0, pillCornerRadius, 0, 0), "\(root.cornerRadii)")
 
-            // Вдали от углов пилюля снова скруглена вся.
+            // Одной стороны довольно: прижатым боком у окна прямые оба угла
+            // на этом боку, хотя ни в какой угол экрана оно не приклеено.
+            placePill(at: NSPoint(x: screen.frame.minX - 50, y: screen.frame.midY))
+            check("У", "прижата к левой стороне экрана, но не в углу",
+                  abs(pill().minX - screen.frame.minX) < 0.5
+                      && pill().minY > screen.frame.minY && pill().maxY < screen.frame.maxY,
+                  "пилюля \(pill()), экран \(screen.frame)")
+            check("У", "у прижатого бока прямые оба угла, у свободного — скруглённые",
+                  root.cornerRadii == (0, pillCornerRadius, pillCornerRadius, 0),
+                  "\(root.cornerRadii)")
+
+            // Вдали от краёв пилюля снова скруглена вся.
             placePill(at: NSPoint(x: screen.frame.midX, y: screen.frame.midY))
-            check("У", "вдали от углов скругление вернулось", root.cornerRadii.bottomLeft > 0)
+            check("У", "вдали от краёв скругление вернулось",
+                  root.cornerRadii == (pillCornerRadius, pillCornerRadius,
+                                       pillCornerRadius, pillCornerRadius),
+                  "\(root.cornerRadii)")
+
+            // Та же таблица без окна: чистой функцией, всеми четырьмя углами.
+            check("У", "ничего не касается — скруглены все четыре",
+                  cornerRadii(touching: [], radius: 8) == (8, 8, 8, 8),
+                  "\(cornerRadii(touching: [], radius: 8))")
+            check("У", "прижат верх — прямые оба верхних",
+                  cornerRadii(touching: .top, radius: 8) == (0, 0, 8, 8),
+                  "\(cornerRadii(touching: .top, radius: 8))")
+            check("У", "прижаты низ и право — скруглён только левый верхний",
+                  cornerRadii(touching: [.bottom, .right], radius: 8) == (8, 0, 0, 0),
+                  "\(cornerRadii(touching: [.bottom, .right], radius: 8))")
 
             window.setFrame(saved, display: true)
             pump(0.2)
@@ -564,8 +614,9 @@ enum LiveInterfaceCheck {
         let statusMenu = delegate.statusMenu
         let titles = statusMenu?.items.map { $0.isSeparatorItem ? "———" : $0.title } ?? []
         check("М", "пункты меню ровно те, что просили",
-              titles.count == 6 && titles[0].hasPrefix("Summary — ")
-              && Array(titles.dropFirst()) == ["Mute", "———", "Reset", "Guide", "Quit"], "\(titles)")
+              titles.count == 9 && titles[0].hasPrefix("Summary — ")
+              && Array(titles.dropFirst()) == ["Mute", "———", "Always Full", "Adaptive",
+                                               "———", "Reset", "Guide", "Quit"], "\(titles)")
         check("М", "пункта «Show Timer» больше нет", !titles.contains("Show Timer"))
 
         // «Mute» — один пункт на два состояния: заголовок называет действие,
@@ -582,6 +633,11 @@ enum LiveInterfaceCheck {
         _ = delegate.perform(NSSelectorFromString("toggleMute"))
         pump()
         check("М", "«Unmute» возвращает звук", !Notifier.isMuted && muteTitle() == "Mute", muteTitle())
+
+        // Дальше по проверке отрезки заканчиваются полтора десятка раз подряд —
+        // и каждый звонит. Что звонок звучит, уже проверено выше (Д1), слушать
+        // его ещё пятнадцать раз незачем: до конца проверки звук выключен.
+        Notifier.isMuted = true
 
         /// Заголовок пункта итога так, как его увидит пользователь: считается
         /// перед показом меню, а не при сборке.
@@ -652,6 +708,209 @@ enum LiveInterfaceCheck {
         check("М", "«Reset» обнуляет итог совсем", summary() == "Summary — 0 h", summary())
         check("М", "«Reset» обнулил и ряд штрихов", segments.filledHalves == 0,
               "половинок \(segments.filledHalves)")
+
+        print("\nВ · Adaptive и Always Full")
+
+        let full = TimerWindowController.windowSize.width
+        let compact = TimerWindowController.compactWidth
+        /// Сколько ждать свёртывания: пауза плюс запас на саму анимацию.
+        let foldWait = TimerWindowController.foldDelay + 2
+        func modeItem(_ title: String) -> NSMenuItem? { statusMenu?.items.first { $0.title == title } }
+        /// Выбор пункта вида — тем же путём, каким его выбирает мышь.
+        func choose(_ title: String) {
+            guard let item = modeItem(title) else { return }
+            _ = delegate.perform(NSSelectorFromString("chooseMode:"), with: item)
+            pump(0.1)
+        }
+        func states() -> [String: NSControl.StateValue] {
+            if let statusMenu { statusMenu.delegate?.menuNeedsUpdate?(statusMenu) }
+            return ["Adaptive": modeItem("Adaptive")?.state ?? .mixed,
+                    "Always Full": modeItem("Always Full")?.state ?? .mixed]
+        }
+
+        check("В", "ёмкий вид из макета — 136 в ширину", compact == 136, "\(compact)")
+        check("В", "по умолчанию выбран Always Full",
+              controller.viewMode == .alwaysFull
+              && states() == ["Adaptive": .off, "Always Full": .on], "\(states())")
+
+        // Always Full: курсора нет, отсчёт идёт — и всё равно полный вид,
+        // сколько бы ни ждали.
+        pointer = pointerAway
+        button("25 min")?.performClick(nil)
+        pump(TimerWindowController.foldDelay + 1)
+        check("В", "в Always Full рабочий отсчёт без курсора не сворачивается",
+              pillWidth() == full, "\(pillWidth())")
+        button("Stop")?.performClick(nil)
+        pump()
+
+        choose("Adaptive")
+        check("В", "выбор Adaptive переставляет галочку",
+              controller.viewMode == .adaptive
+              && states() == ["Adaptive": .on, "Always Full": .off], "\(states())")
+
+        // Курсор на пилюле: отсчёт начинается в полном виде.
+        pointer = NSPoint(x: window.frame.midX, y: window.frame.midY)
+        button("25 min")?.performClick(nil)
+        pump()
+        check("В", "под курсором отсчёт идёт полным видом", pillWidth() == full, "\(pillWidth())")
+
+        // Курсор ушёл с окна — тем же путём, каким это делает `mouseExited`.
+        pointer = pointerAway
+        controller.syncWidth(animated: true)
+        pump(min(2, TimerWindowController.foldDelay - 1))
+        check("В", "сразу за курсором трекер не сворачивается — держит паузу",
+              pillWidth() == full, "через 2 с ширина \(pillWidth())")
+        check("В", "после паузы сворачивается до 136",
+              wait(upTo: foldWait) { pillWidth() == compact }, "\(pillWidth())")
+        check("В", "в ёмком виде остаются табло и полоса", onScreen(clock) && onScreen(bar))
+        check("В", "высота при этом не меняется",
+              window.frame.height - TimerWindowController.shadowMargin * 2
+                  == TimerWindowController.windowSize.height, "\(window.frame.height)")
+
+        // Курсор вернулся на пилюлю — полный вид возвращается сразу, без паузы.
+        pointer = NSPoint(x: window.frame.midX, y: window.frame.midY)
+        controller.syncWidth(animated: true)
+        pump(0.1)
+        let midway = pillWidth()
+        check("В", "под курсором возвращается полный вид",
+              wait(upTo: 2) { pillWidth() == full }, "\(pillWidth())")
+        check("В", "разворачивается плавно, а не прыжком", midway > compact && midway < full,
+              "через 0,1 с ширина \(midway)")
+        check("В", "и кнопки отсчёта снова на месте",
+              ["Pause", "Finish now", "Stop"].allSatisfy { button($0).map(onScreen) == true })
+
+        // Курсор ушёл и вернулся, не дождавшись конца паузы: свёртывание отменено.
+        pointer = pointerAway
+        controller.syncWidth(animated: true)
+        pump(1)
+        pointer = NSPoint(x: window.frame.midX, y: window.frame.midY)
+        controller.syncWidth(animated: true)
+        pump(TimerWindowController.foldDelay)
+        check("В", "вернувшийся до конца паузы курсор её отменяет",
+              pillWidth() == full, "\(pillWidth())")
+
+        pointer = pointerAway
+        controller.syncWidth(animated: true)
+        _ = wait(upTo: foldWait) { pillWidth() == compact }
+        button("Pause")?.performClick(nil)
+        check("В", "на паузе полный вид возвращается сразу: «Resume» нужен под рукой",
+              wait(upTo: 2) { pillWidth() == full }, "\(pillWidth())")
+        button("Resume")?.performClick(nil)
+        check("В", "после продолжения снова сворачивается",
+              wait(upTo: foldWait) { pillWidth() == compact }, "\(pillWidth())")
+
+        button("Finish now")?.performClick(nil)
+        pump(0.5)
+        check("В", "на пятиминутке всегда полный вид",
+              face() == "05:00" && wait(upTo: 2) { pillWidth() == full },
+              "табло «\(face())», ширина \(pillWidth())")
+        button("Stop")?.performClick(nil)
+        pump(0.5)
+        check("В", "на экране выбора всегда полный вид", pillWidth() == full, "\(pillWidth())")
+
+        // Курсор возвращаем на окно: дальше проверки про полный вид.
+        pointer = NSPoint(x: window.frame.midX, y: window.frame.midY)
+        controller.syncWidth(animated: false)
+        pump()
+
+        print("\nТ · трекер таскают за любое место")
+        // Настоящую мышь проверка не двигает: окну подменяется курсор, а события
+        // нажатия и переноса синтезируются и кладутся в очередь заранее — цикл
+        // переноса разбирает их и живого человека не ждёт.
+        if let snapping = window as? SnappingWindow, let screen = window.screen ?? NSScreen.main {
+            // Подальше от краёв: у края окно упрётся или прилипнет, и сдвиг
+            // будет не тот, что задан.
+            window.setFrame(NSRect(origin: NSPoint(x: screen.frame.midX - window.frame.width / 2,
+                                                   y: screen.frame.midY - window.frame.height / 2),
+                                   size: window.frame.size), display: true)
+            pump(0.2)
+
+            func synthetic(_ type: NSEvent.EventType) -> NSEvent {
+                NSEvent.mouseEvent(with: type, location: .zero, modifierFlags: [],
+                                   timestamp: ProcessInfo.processInfo.systemUptime,
+                                   windowNumber: window.windowNumber, context: nil,
+                                   eventNumber: 0, clickCount: 1, pressure: 1)!
+            }
+
+            /// Тащит вид на 40 точек по обеим осям и возвращает, куда уехало окно.
+            ///
+            /// Курсор читается по одной точке за вызов: сначала место нажатия,
+            /// потом отход за порог (это и есть «перенос, а не клик»), потом
+            /// старт переноса и сам сдвиг. Дальше точка не меняется, поэтому
+            /// сколько бы событий переноса ни разобрал цикл окна, уедет оно
+            /// ровно на заданные 40 точек: сдвиг считается от старта переноса
+            /// до последнего прочтения курсора.
+            func drag(_ view: NSView) -> NSSize {
+                let path = [NSPoint(x: 500, y: 500), NSPoint(x: 560, y: 500),
+                            NSPoint(x: 560, y: 500), NSPoint(x: 600, y: 540)]
+                var step = 0
+                snapping.pointerLocation = {
+                    defer { step += 1 }
+                    return path[min(step, path.count - 1)]
+                }
+                let before = window.frame.origin
+                // Событий переноса посылается с запасом. Ровно двух не хватало:
+                // одно забирает порог, второе достаётся циклу переноса — и если
+                // хоть одно по дороге терялось, окно не двигалось вовсе, а
+                // проверка «не тащится» врала на исправном коде.
+                for _ in 0..<4 { NSApp.postEvent(synthetic(.leftMouseDragged), atStart: false) }
+                NSApp.postEvent(synthetic(.leftMouseUp), atStart: false)
+                view.mouseDown(with: synthetic(.leftMouseDown))
+                pump(0.2)
+                snapping.pointerLocation = { NSEvent.mouseLocation }
+                return NSSize(width: window.frame.origin.x - before.x,
+                              height: window.frame.origin.y - before.y)
+            }
+
+            /// Нажатие без переноса: мышь стоит на месте, отпустили — это клик.
+            func tap(_ view: NSView) {
+                snapping.pointerLocation = { NSPoint(x: 500, y: 500) }
+                NSApp.postEvent(synthetic(.leftMouseUp), atStart: false)
+                view.mouseDown(with: synthetic(.leftMouseDown))
+                pump(0.2)
+                snapping.pointerLocation = { NSEvent.mouseLocation }
+            }
+
+            // Ряд черточек: раньше он забирал нажатие себе, и утащить окно
+            // за него было нельзя.
+            if let segmentsRow = descendants(SegmentsView.self, of: content).first {
+                let moved = drag(segmentsRow)
+                check("Т", "окно тащится за ряд черточек", moved == NSSize(width: 40, height: 40),
+                      "уехало на \(moved)")
+                check("Т", "перенос за ряд не выкатил кнопку сброса",
+                      button("Reset progress").map(onScreen) != true)
+            }
+
+            // Кнопка выбора: перенос за неё не должен запускать отсчёт.
+            if let preset = button("25 min") {
+                let moved = drag(preset)
+                check("Т", "окно тащится за кнопку выбора", moved == NSSize(width: 40, height: 40),
+                      "уехало на \(moved)")
+                check("Т", "перенос за кнопку не запустил отсчёт", !onScreen(clock))
+
+                // А обычное нажатие на месте кнопку по-прежнему нажимает.
+                tap(preset)
+                check("Т", "нажатие без переноса запускает отсчёт", onScreen(clock),
+                      "экран отсчёта не открылся")
+            }
+
+            // Кнопка отсчёта: перенос за «паузу» не должен ставить на паузу.
+            if let pause = button("Pause") {
+                let moved = drag(pause)
+                check("Т", "окно тащится за кнопку отсчёта", moved == NSSize(width: 40, height: 40),
+                      "уехало на \(moved)")
+                check("Т", "перенос за «паузу» отсчёт не остановил", button("Pause") != nil,
+                      "кнопка стала «Resume»")
+            }
+            button("Stop")?.performClick(nil)
+            pump()
+
+            // Табло тоже часть трекера: за него окно таскали и раньше — теперь
+            // тем же порогом, что и всё остальное.
+            let movedByClock = drag(clock)
+            check("Т", "окно тащится за табло", movedByClock == NSSize(width: 40, height: 40),
+                  "уехало на \(movedByClock)")
+        }
 
         print("\nГ · окно «Guide»")
         // Гайд — единственное место, где кнопки названы словами: сами кнопки

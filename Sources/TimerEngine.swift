@@ -188,15 +188,52 @@ enum Segments {
 }
 
 /// Цвет свечения за левым верхним углом. Перебирается кликом по табло:
-/// красный по умолчанию, дальше зелёный, фиолетовый, синий и снова красный.
+/// зелёный по умолчанию, дальше фиолетовый, синий, красный и снова зелёный.
 enum Accent: CaseIterable {
     case red, green, purple, blue
+
+    /// С чего начинается перебор — и каким окно светится, пока по табло не кликали.
+    static let `default` = Accent.green
 
     var next: Accent {
         let all = Accent.allCases
         let index = all.firstIndex(of: self) ?? 0
         return all[(index + 1) % all.count]
     }
+}
+
+/// Как трекер держит ширину. Пункт меню, всегда выбран ровно один.
+///
+/// Порядок случаев — это порядок пунктов в меню: сначала полный вид, под ним
+/// адаптивный.
+enum ViewMode: CaseIterable {
+    /// Полный вид всегда, в любом состоянии.
+    case alwaysFull
+    /// Без курсора идущий рабочий отсчёт сжимается до табло и полосы,
+    /// под курсором разворачивается обратно.
+    case adaptive
+
+    /// Вид при запуске: полный. Свернувшийся сам по себе трекер — сюрприз,
+    /// на который надо согласиться, а не то, что человек видит первым делом.
+    static let `default` = ViewMode.alwaysFull
+
+    /// Заголовок пункта меню.
+    var title: String {
+        switch self {
+        case .adaptive:   return "Adaptive"
+        case .alwaysFull: return "Always Full"
+        }
+    }
+}
+
+/// Свёрнут ли трекер прямо сейчас.
+///
+/// Ёмкий вид бывает ровно в одном случае: режим `Adaptive`, идёт рабочий
+/// отсчёт (25 или 55) и курсора на окне нет. Пятиминутка, пауза, экран выбора
+/// и режим `Always Full` — всегда полный вид: там кнопки нужны сразу.
+func isCompact(mode: ViewMode, state: TimerState, kind: Kind, hovered: Bool) -> Bool {
+    guard mode == .adaptive, !hovered, kind == .focus else { return false }
+    return state == .running
 }
 
 /// Зачем запущен отсчёт. От этого зависит и цвет полосы, и что будет по звонку.

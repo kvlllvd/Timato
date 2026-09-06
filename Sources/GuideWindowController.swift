@@ -68,9 +68,12 @@ final class GuideWindowController: NSWindowController {
 
         let rows = [
             row(symbol: "clock", title: "Tap the time",
-                body: "Cycles the corner glow — red, green, purple, blue. Just for looks."),
+                body: "Cycles the corner glow — green, purple, blue, red. Just for looks."),
             row(dashesTitle: "Tap the dashes",
                 body: "Shows a reset button in place of 25 / 55 — clears the count so far."),
+            row(symbol: "hand.draw", title: "Drag it anywhere",
+                body: "Grab any part of the window and move it. Near a screen corner it " +
+                      "snaps flush — right into the corner, under the menu bar or the Dock."),
             row(symbol: "forward.fill", title: "Finish now",
                 body: "Ends the session early — still counts as done."),
             row(symbol: "pause.fill", title: "Pause",
@@ -104,16 +107,23 @@ final class GuideWindowController: NSWindowController {
             brand.topAnchor.constraint(equalTo: root.topAnchor, constant: topPadding),
 
             intro.topAnchor.constraint(equalTo: brand.bottomAnchor, constant: 14),
-            rows[0].topAnchor.constraint(equalTo: intro.bottomAnchor, constant: 16),
-            rows[1].topAnchor.constraint(equalTo: rows[0].bottomAnchor, constant: 16),
-            rows[2].topAnchor.constraint(equalTo: rows[1].bottomAnchor, constant: 16),
-            rows[3].topAnchor.constraint(equalTo: rows[2].bottomAnchor, constant: 16),
-            rows[4].topAnchor.constraint(equalTo: rows[3].bottomAnchor, constant: 16),
-            note.topAnchor.constraint(equalTo: rows[4].bottomAnchor, constant: 18),
+            // Подпись под логотипом отделена от списка сильнее, чем пункты друг
+            // от друга: она про приложение целиком, а не про очередную кнопку.
+            rows[0].topAnchor.constraint(equalTo: intro.bottomAnchor, constant: 32),
+            // Заметка про пятиминутку отбита от списка тем же увеличенным
+            // отступом: она не пункт списка, а отдельный блок под ним.
+            note.topAnchor.constraint(equalTo: rows[rows.count - 1].bottomAnchor, constant: 34),
             // Последний констрейнт до низа корня — им и определяется итоговая
             // высота окна в `fitWindow`, всё остальное выводится из него вверх по цепочке.
             note.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -bottomPadding),
         ])
+
+        // Пункты списка идут друг за другом с одинаковым шагом — цепочкой,
+        // а не перечислением по номерам: пункт добавляют и убирают, и раскладка
+        // не должна знать, сколько их сейчас.
+        for (previous, next) in zip(rows, rows.dropFirst()) {
+            next.topAnchor.constraint(equalTo: previous.bottomAnchor, constant: 16).isActive = true
+        }
 
         return root
     }
