@@ -107,7 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Вид трекера и тема — своей группой и оба вложенным меню: это не
         // действия, а два выбора «каким окну быть». Их делают однажды и надолго,
         // поэтому наружу вынесены не сами варианты, а два заголовка.
-        let modeItem = menu.addItem(withTitle: "Mode", action: nil, keyEquivalent: "")
+        let modeItem = menu.addItem(withTitle: "Size", action: nil, keyEquivalent: "")
         let modeMenu = NSMenu()
         for mode in ViewMode.allCases {
             let item = modeMenu.addItem(withTitle: mode.title, action: #selector(chooseMode(_:)),
@@ -173,7 +173,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         muteItem?.title = Self.muteTitle(isMuted: Notifier.isMuted)
     }
 
-    /// «Adaptive» / «Always Full» — как трекер держит ширину. Пункты работают
+    /// «Adaptive» / «Full» — как трекер держит ширину. Пункты работают
     /// как переключатель: выбранный помечен галочкой, выбрать «ничего» нельзя.
     @objc private func chooseMode(_ sender: NSMenuItem) {
         guard let mode = sender.representedObject as? ViewMode else { return }

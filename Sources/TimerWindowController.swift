@@ -534,14 +534,15 @@ final class ProgressBar: TrackerView {
 
 // MARK: - Черточки
 
-/// Ряд черточек под цифрами: четыре штуки, растянутые на всю ширину окна.
+/// Ряд черточек под цифрами: четыре штуки, растянутые на всю ширину окна,
+/// а после четвёртой закрашенной — восемь той же общей ширины.
 ///
 /// Считает не отрезки, а половинки: 25 минут закрашивают половину черточки,
 /// 50 — целую. Клик по ряду переключает кнопку сброса на месте кнопок выбора:
 /// ряд сам по себе ничего не сбрасывает, сброс — дело кнопки.
 final class SegmentsView: TrackerView {
     /// Зазор между черточками из макета. Сама ширина черточки не задана —
-    /// она равна остатку, поделённому на четыре.
+    /// она равна остатку, поделённому на число черточек в ряду.
     private let gap: CGFloat = 4
     private let thickness: CGFloat = 4
 
@@ -566,9 +567,13 @@ final class SegmentsView: TrackerView {
         NSSize(width: NSView.noIntrinsicMetric, height: thickness)
     }
 
+    /// Сколько черточек в ряду прямо сейчас: четыре или восемь.
+    private var count: Int { Segments.shown(filledHalves: filledHalves) }
+
     /// Прямоугольник черточки с номером `index` в текущей ширине вида.
-    private func rect(at index: Int) -> NSRect {
-        let count = CGFloat(Presets.segments)
+    /// Ряд всегда занимает всю ширину: чем больше черточек, тем они уже.
+    private func rect(at index: Int, of count: Int) -> NSRect {
+        let count = CGFloat(count)
         let width = (bounds.width - gap * (count - 1)) / count
         return NSRect(x: CGFloat(index) * (width + gap), y: 0,
                       width: width, height: bounds.height)
@@ -576,8 +581,9 @@ final class SegmentsView: TrackerView {
 
     override func draw(_ dirtyRect: NSRect) {
         let radius = bounds.height / 2
-        for index in 0..<Presets.segments {
-            let slot = rect(at: index)
+        let count = count
+        for index in 0..<count {
+            let slot = rect(at: index, of: count)
             let shape = NSBezierPath(roundedRect: slot, xRadius: radius, yRadius: radius)
             colors.todo.setFill()
             shape.fill()
@@ -1273,7 +1279,7 @@ final class TimerWindowController: NSWindowController {
     /// Заполнился весь ряд — следующий отрезок начинает его заново.
     private var filledHalves = 0
     /// Всё отработанное за сеанс, тоже в половинках. В отличие от ряда,
-    /// на четырёх штрихах не обнуляется: ряд показывает круг, а это — итог.
+    /// на восьми штрихах не обнуляется: ряд показывает круг, а это — итог.
     private var totalHalves = 0
 
     /// Итог для пункта «Summary», в половинках штриха. Наружу отдаются именно
@@ -1283,7 +1289,7 @@ final class TimerWindowController: NSWindowController {
     private var accent: Accent = .default
 
     /// Как трекер держит ширину: `Adaptive` — сворачивается без курсора,
-    /// `Always Full` — всегда полный. Переключается пунктами меню помидора.
+    /// `Full` — всегда полный. Переключается пунктами меню помидора.
     var viewMode: ViewMode = .default {
         didSet { syncWidth(animated: true) }
     }
@@ -1772,7 +1778,7 @@ final class TimerWindowController: NSWindowController {
             guard let self else { return }
             self.foldTimer = nil
             // За пять секунд всё могло перемениться: курсор вернулся, отсчёт
-            // встал на паузу, человек выбрал `Always Full`.
+            // встал на паузу, человек выбрал `Full`.
             guard self.wantsCompact else { return }
             self.setPillWidth(Self.compactWidth, animated: true)
         }

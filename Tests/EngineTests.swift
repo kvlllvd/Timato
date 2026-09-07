@@ -214,8 +214,30 @@ enum EngineTests {
 
         // --- черточки: всегда четыре, счёт в половинках ---
         do {
-            check("Д2", "черточек всегда четыре", Presets.segments == 4)
-            check("Д2", "ёмкость ряда — восемь половинок", Segments.capacity == 8)
+            check("Д2", "поначалу черточек четыре", Presets.segments == 4)
+            check("Д2", "разросшийся ряд — восемь черточек", Segments.expandedCount == 8)
+            check("Д2", "ёмкость первого ряда — восемь половинок", Segments.rowCapacity == 8)
+            check("Д2", "вся ёмкость — шестнадцать половинок, то есть восемь часов",
+                  Segments.capacity == 16)
+
+            // Ряд растёт не по кнопке, а сам: пока закрашено не больше четырёх
+            // черточек — их и видно, за четвёртой ряд перестраивается на восемь.
+            check("Д2", "на пустом ряду черточек четыре", Segments.shown(filledHalves: 0) == 4)
+            check("Д2", "три с половиной черточки — ряд ещё из четырёх",
+                  Segments.shown(filledHalves: 7) == 4)
+            check("Д2", "все четыре закрашены — ряд ещё из четырёх",
+                  Segments.shown(filledHalves: 8) == 4)
+            check("Д2", "4,5 черточки — справа появились ещё четыре",
+                  Segments.shown(filledHalves: 9) == 8)
+            check("Д2", "полный ряд — восемь черточек",
+                  Segments.shown(filledHalves: Segments.capacity) == 8)
+
+            // Новые черточки могут появиться уже начатыми: было 3,5, отработали
+            // целую — стало 4,5, и пятая стоит наполовину.
+            check("Д2", "с 3,5 черточки целый отрезок даёт 4,5",
+                  Segments.advance(7, minutes: 50) == 9)
+            check("Д2", "и пятая черточка стоит наполовину",
+                  segmentFill(index: 4, filledHalves: 9) == 0.5)
 
             check("Д2", "25 минут закрашивают половину", Segments.credit(minutes: 25) == 1)
             check("Д2", "50 минут закрашивают целую", Segments.credit(minutes: 50) == 2)
@@ -227,13 +249,15 @@ enum EngineTests {
 
             // Полный ряд стоит на экране до конца следующего отрезка, и уже тот
             // начинает его заново — иначе четыре закрашенные черточки не увидеть.
-            check("Д2", "четыре по 50 заполняют ряд целиком",
-                  (0..<4).reduce(0) { row, _ in Segments.advance(row, minutes: 50) } == 8)
+            check("Д2", "восемь по 50 заполняют ряд целиком",
+                  (0..<8).reduce(0) { row, _ in Segments.advance(row, minutes: 50) } == 16)
             check("Д2", "после полного ряда следующие 50 начинают ряд заново",
-                  Segments.advance(8, minutes: 50) == 2)
+                  Segments.advance(16, minutes: 50) == 2)
+            check("Д2", "и ряд снова из четырёх черточек",
+                  Segments.shown(filledHalves: Segments.advance(16, minutes: 50)) == 4)
             check("Д2", "после полного ряда следующие 25 дают половину",
-                  Segments.advance(8, minutes: 25) == 1)
-            check("Д2", "ряд не переполняется", Segments.advance(7, minutes: 50) == 8)
+                  Segments.advance(16, minutes: 25) == 1)
+            check("Д2", "ряд не переполняется", Segments.advance(15, minutes: 50) == 16)
 
             check("Д2", "на пустом ряду первая черточка пуста",
                   segmentFill(index: 0, filledHalves: 0) == 0)
@@ -243,8 +267,10 @@ enum EngineTests {
                   segmentFill(index: 0, filledHalves: 2) == 1)
             check("Д2", "вторая черточка ждёт своей очереди",
                   segmentFill(index: 1, filledHalves: 2) == 0)
-            check("Д2", "полный ряд закрашен весь",
+            check("Д2", "ряд из четырёх закрашен весь",
                   (0..<4).allSatisfy { segmentFill(index: $0, filledHalves: 8) == 1 })
+            check("Д2", "полный ряд из восьми закрашен весь",
+                  (0..<8).allSatisfy { segmentFill(index: $0, filledHalves: 16) == 1 })
         }
 
         // --- цвет свечения: клик по табло перебирает четыре по кругу ---
@@ -349,7 +375,7 @@ enum EngineTests {
             check("В", "Adaptive: на экране выбора вид полный",
                   !isCompact(mode: .adaptive, state: .idle, kind: .focus, hovered: false)
                   && !isCompact(mode: .adaptive, state: .finished, kind: .focus, hovered: false))
-            check("В", "Always Full не сворачивается ни в одном состоянии",
+            check("В", "Full не сворачивается ни в одном состоянии",
                   [TimerState.idle, .running, .paused, .finished].allSatisfy { state in
                       [Kind.focus, .rest].allSatisfy { kind in
                           [true, false].allSatisfy { hovered in
@@ -359,7 +385,7 @@ enum EngineTests {
                   })
             check("В", "в меню два вида, адаптивный первым",
                   ViewMode.allCases.count == 2
-                  && ViewMode.allCases.map(\.title) == ["Adaptive", "Always Full"],
+                  && ViewMode.allCases.map(\.title) == ["Adaptive", "Full"],
                   "\(ViewMode.allCases.map(\.title))")
             check("В", "по умолчанию выбран полный вид", ViewMode.default == .alwaysFull,
                   "\(ViewMode.default)")

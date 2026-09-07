@@ -159,8 +159,9 @@ enum Presets {
     static func restAfter(minutes: Int) -> Int {
         minutes >= 50 ? 10 : 5
     }
-    /// Черточек в ряду всегда ровно четыре: они растянуты на всю ширину окна,
-    /// поэтому ряд не может ни расти, ни сжиматься — в макете это четыре кнопки.
+    /// Черточек в ряду поначалу четыре — они растянуты на всю ширину окна,
+    /// как две кнопки выбора над ними. Заполнились все четыре — ряд делится
+    /// вдвое мельче, и справа появляются ещё четыре: см. `Segments.shown`.
     static let segments = 4
 }
 
@@ -170,8 +171,23 @@ enum Presets {
 enum Segments {
     /// Половинок в одной черточке.
     static let halvesPerSegment = 2
-    /// Вся ёмкость ряда в половинках: четыре черточки по две.
-    static let capacity = Presets.segments * halvesPerSegment
+    /// Ёмкость первого ряда в половинках: четыре черточки по две.
+    static let rowCapacity = Presets.segments * halvesPerSegment
+    /// Сколько черточек в разросшемся ряду: те же четыре и ещё четыре справа.
+    static let expandedCount = Presets.segments * 2
+    /// Вся ёмкость ряда в половинках: восемь черточек по две, то есть восемь часов.
+    static let capacity = expandedCount * halvesPerSegment
+
+    /// Сколько черточек показывать при таком закрашивании.
+    ///
+    /// Пока закрашено не больше четырёх черточек — их и видно, во всю ширину.
+    /// Стоит перевалить за четвёртую — ряд перестраивается на восемь, той же
+    /// общей ширины: старые четыре сжимаются, справа встают ещё четыре. Новые
+    /// могут появиться уже начатыми: было 3,5 черточки, отработали целую —
+    /// получилось 4,5, и пятая стоит наполовину.
+    static func shown(filledHalves: Int) -> Int {
+        filledHalves > rowCapacity ? expandedCount : Presets.segments
+    }
 
     /// Сколько половинок закрашивает отработанный отрезок.
     /// Отдых не закрашивает ничего: засечка ставится за работу.
@@ -184,8 +200,8 @@ enum Segments {
     /// Ряд после ещё одного отработанного отрезка.
     ///
     /// Заполненный ряд не обнуляется в тот же миг, когда закрасилась последняя
-    /// черточка, — иначе все четыре не увидеть ни секунды. Он стоит полным до
-    /// конца следующего отрезка, и уже тот начинает ряд заново.
+    /// черточка, — иначе все восемь не увидеть ни секунды. Он стоит полным до
+    /// конца следующего отрезка, и уже тот начинает ряд заново, снова с четырёх.
     static func advance(_ filled: Int, minutes: Int) -> Int {
         let credit = credit(minutes: minutes)
         guard credit > 0 else { return filled }
@@ -211,7 +227,7 @@ enum Accent: CaseIterable {
 
 /// Как трекер держит ширину. Пункт меню, всегда выбран ровно один.
 ///
-/// Порядок случаев — это порядок пунктов во вложенном меню «Mode»: сначала
+/// Порядок случаев — это порядок пунктов во вложенном меню «Size»: сначала
 /// адаптивный вид, под ним полный.
 enum ViewMode: CaseIterable {
     /// Без курсора идущий рабочий отсчёт сжимается до табло и полосы,
@@ -228,7 +244,7 @@ enum ViewMode: CaseIterable {
     var title: String {
         switch self {
         case .adaptive:   return "Adaptive"
-        case .alwaysFull: return "Always Full"
+        case .alwaysFull: return "Full"
         }
     }
 }
@@ -237,7 +253,7 @@ enum ViewMode: CaseIterable {
 ///
 /// Ёмкий вид бывает ровно в одном случае: режим `Adaptive`, идёт рабочий
 /// отсчёт (25 или 50) и курсора на окне нет. Отдых, пауза, экран выбора
-/// и режим `Always Full` — всегда полный вид: там кнопки нужны сразу.
+/// и режим `Full` — всегда полный вид: там кнопки нужны сразу.
 func isCompact(mode: ViewMode, state: TimerState, kind: Kind, hovered: Bool) -> Bool {
     guard mode == .adaptive, !hovered, kind == .focus else { return false }
     return state == .running
@@ -262,7 +278,8 @@ func nextAfterFinish(minutes: Int) -> Int? {
 
 /// Насколько закрашена черточка с номером `index`, от 0 до 1.
 /// Ряд закрашивается слева направо: до текущей — целиком, после — пусто,
-/// а сама текущая может стоять наполовину.
+/// а сама текущая может стоять наполовину. Номер считается одинаково и в ряду
+/// из четырёх, и в разросшемся из восьми: черточки везде по две половинки.
 func segmentFill(index: Int, filledHalves: Int) -> CGFloat {
     let halves = max(0, min(Segments.capacity, filledHalves)) - index * Segments.halvesPerSegment
     let clamped = max(0, min(Segments.halvesPerSegment, halves))

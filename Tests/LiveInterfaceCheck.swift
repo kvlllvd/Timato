@@ -259,7 +259,7 @@ enum LiveInterfaceCheck {
         print("\nПравки из Figma")
 
         // 3 — четыре черточки во всю ширину окна, а не короткий ряд засечек.
-        check("Ф3", "черточек всегда четыре", Presets.segments == 4)
+        check("Ф3", "поначалу черточек четыре", Segments.shown(filledHalves: 0) == 4)
         check("Ф3", "ряд растянут во всю ширину между отступами",
               abs(segments.frame.width - (TimerWindowController.windowSize.width - 32)) < 0.5,
               "ширина \(segments.frame.width)")
@@ -646,16 +646,16 @@ enum LiveInterfaceCheck {
         let titles = statusMenu?.items.map { $0.isSeparatorItem ? "———" : $0.title } ?? []
         check("М", "пункты меню ровно те, что просили, и в том же порядке",
               titles.count == 10 && titles[0].hasPrefix("Summary — ")
-              && Array(titles.dropFirst()) == ["Mute", "———", "Mode", "Theme",
+              && Array(titles.dropFirst()) == ["Mute", "———", "Size", "Theme",
                                                "———", "Guide",
                                                "———", "Reset", "Quit"], "\(titles)")
         check("М", "пункта «Show Timer» больше нет", !titles.contains("Show Timer"))
 
         // Вид трекера — вложенным меню: наружу вынесен один заголовок, оба
         // варианта внутри, адаптивный первым.
-        let modeSubmenu = statusMenu?.items.first { $0.title == "Mode" }?.submenu
-        check("М", "«Mode» — выпадающий список из двух видов",
-              modeSubmenu?.items.map(\.title) == ["Adaptive", "Always Full"],
+        let modeSubmenu = statusMenu?.items.first { $0.title == "Size" }?.submenu
+        check("М", "«Size» — выпадающий список из двух видов",
+              modeSubmenu?.items.map(\.title) == ["Adaptive", "Full"],
               "\(modeSubmenu?.items.map(\.title) ?? [])")
 
         // Тема — таким же вложенным меню рядом: три пункта и галочка ровно на
@@ -726,9 +726,22 @@ enum LiveInterfaceCheck {
             button("Stop")?.performClick(nil)
             pump()
         }
+        check("М", "за четвёртой черточкой ряд разросся до восьми",
+              segments.filledHalves == 9 && Segments.shown(filledHalves: 9) == 8,
+              "половинок \(segments.filledHalves)")
+        check("М", "итог считает те же 4,5 часа", summary() == "Summary — 4,5 h", summary())
+
+        for _ in 0..<4 {
+            button("50 min")?.performClick(nil)
+            pump()
+            button("Finish now")?.performClick(nil)
+            pump()
+            button("Stop")?.performClick(nil)
+            pump()
+        }
         check("М", "ряд заполнен целиком", segments.filledHalves == Segments.capacity,
               "половинок \(segments.filledHalves)")
-        check("М", "итог уже больше, чем показывает ряд", summary() == "Summary — 4,5 h", summary())
+        check("М", "итог уже больше, чем показывает ряд", summary() == "Summary — 8,5 h", summary())
 
         // Следующий отрезок начинает ряд заново — а итог просто растёт дальше.
         button("50 min")?.performClick(nil)
@@ -739,7 +752,7 @@ enum LiveInterfaceCheck {
         pump()
         check("М", "ряд пошёл по второму кругу", segments.filledHalves == 2,
               "половинок \(segments.filledHalves)")
-        check("М", "итог круг не заметил", summary() == "Summary — 5,5 h", summary())
+        check("М", "итог круг не заметил", summary() == "Summary — 9,5 h", summary())
 
         check("М", "целое число часов пишется без хвоста",
               AppDelegate.summaryTitle(halves: 6) == "Summary — 3 h",
@@ -758,14 +771,14 @@ enum LiveInterfaceCheck {
         check("М", "«Reset» обнулил и ряд штрихов", segments.filledHalves == 0,
               "половинок \(segments.filledHalves)")
 
-        print("\nВ · Adaptive и Always Full")
+        print("\nВ · Adaptive и Full")
 
         let full = TimerWindowController.windowSize.width
         let compact = TimerWindowController.compactWidth
         /// Сколько ждать свёртывания: пауза плюс запас на саму анимацию.
         let foldWait = TimerWindowController.foldDelay + 2
         func modeItem(_ title: String) -> NSMenuItem? {
-            statusMenu?.items.first { $0.title == "Mode" }?.submenu?.items.first { $0.title == title }
+            statusMenu?.items.first { $0.title == "Size" }?.submenu?.items.first { $0.title == title }
         }
         /// Выбор пункта вида — тем же путём, каким его выбирает мышь.
         func choose(_ title: String) {
@@ -776,20 +789,20 @@ enum LiveInterfaceCheck {
         func states() -> [String: NSControl.StateValue] {
             if let statusMenu { statusMenu.delegate?.menuNeedsUpdate?(statusMenu) }
             return ["Adaptive": modeItem("Adaptive")?.state ?? .mixed,
-                    "Always Full": modeItem("Always Full")?.state ?? .mixed]
+                    "Full": modeItem("Full")?.state ?? .mixed]
         }
 
         check("В", "ёмкий вид из макета — 136 в ширину", compact == 136, "\(compact)")
-        check("В", "по умолчанию выбран Always Full",
+        check("В", "по умолчанию выбран Full",
               controller.viewMode == .alwaysFull
-              && states() == ["Adaptive": .off, "Always Full": .on], "\(states())")
+              && states() == ["Adaptive": .off, "Full": .on], "\(states())")
 
-        // Always Full: курсора нет, отсчёт идёт — и всё равно полный вид,
+        // Full: курсора нет, отсчёт идёт — и всё равно полный вид,
         // сколько бы ни ждали.
         pointer = pointerAway
         button("25 min")?.performClick(nil)
         pump(TimerWindowController.foldDelay + 1)
-        check("В", "в Always Full рабочий отсчёт без курсора не сворачивается",
+        check("В", "в Full рабочий отсчёт без курсора не сворачивается",
               pillWidth() == full, "\(pillWidth())")
         button("Stop")?.performClick(nil)
         pump()
@@ -797,7 +810,7 @@ enum LiveInterfaceCheck {
         choose("Adaptive")
         check("В", "выбор Adaptive переставляет галочку",
               controller.viewMode == .adaptive
-              && states() == ["Adaptive": .on, "Always Full": .off], "\(states())")
+              && states() == ["Adaptive": .on, "Full": .off], "\(states())")
 
         // Курсор на пилюле: отсчёт начинается в полном виде.
         pointer = NSPoint(x: window.frame.midX, y: window.frame.midY)
