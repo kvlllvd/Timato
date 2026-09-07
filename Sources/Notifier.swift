@@ -15,10 +15,10 @@ enum Notifier {
     /// Живёт только в памяти, как и итог за сеанс: после `Quit` звук снова включён.
     /// Баннер уведомления при этом остаётся — молчит именно звонок.
     ///
-    /// Стартовое положение можно приглушить переменной окружения `PIMER_MUTE=1`:
+    /// Стартовое положение можно приглушить переменной окружения `TIMATO_MUTE=1`:
     /// при разработке приложение запускают десятками раз подряд, и звонок из
     /// фона бьёт по ушам. Обычный запуск переменной не видит — там звук включён.
-    static var isMuted = ProcessInfo.processInfo.environment["PIMER_MUTE"] == "1"
+    static var isMuted = ProcessInfo.processInfo.environment["TIMATO_MUTE"] == "1"
 
     /// Готовит звонок заранее, ещё до первого отсчёта.
     ///
@@ -111,7 +111,7 @@ enum Chime {
     /// и первый переход подвисал, а все следующие шли быстро.
     ///
     /// Очередь заодно и защищает состояние ниже: трогают его только отсюда.
-    private static let queue = DispatchQueue(label: "com.dkovalev.pimer.chime",
+    private static let queue = DispatchQueue(label: "com.dkovalev.timato.chime",
                                              qos: .userInitiated)
 
     /// Движок и узел живут статически: локальные умолкают вместе с уходом

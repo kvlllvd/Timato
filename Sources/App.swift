@@ -34,6 +34,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Пункты вида трекера. Галочка стоит ровно на одном из них: вид у трекера
     /// всегда какой-то один, «ни того ни другого» не бывает.
     private var modeItems: [NSMenuItem] = []
+    /// Пункты темы во вложенном меню «Theme». Тоже переключатель: выбранная
+    /// тема помечена галочкой, и она всегда одна.
+    private var themeItems: [NSMenuItem] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Шрифт — до создания окна: интерфейс собирается уже с ним.
@@ -42,6 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Звонок готовится сразу: иначе первый же переход «работа → отдых»
         // ждал бы подъёма звукового движка.
         Notifier.prewarm()
+        observeTheme()
 
         let controller = TimerWindowController()
         controller.showWindow(nil)
@@ -59,14 +63,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// вообще, а выйти можно было бы только мышью через помидор.
     private func buildMainMenu() {
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "Hide Pimer", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(withTitle: "Hide Timato", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         // Свой обработчик, а не `performClose:`: у окна `.borderless` нет
         // `.closable`, поэтому системный путь закрытия отключает сам пункт
         // (`validateMenuItem` → false) и Cmd+W до окна не доходит вовсе.
         appMenu.addItem(withTitle: "Close Window", action: #selector(closeWindow),
                         keyEquivalent: "w").target = self
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Quit Pimer", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "Quit Timato", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 
         let appItem = NSMenuItem()
         appItem.submenu = appMenu
@@ -81,7 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func buildStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.image = TomatoIcon.statusBarImage()
-        item.button?.toolTip = "Pimer"
+        item.button?.toolTip = "Timato"
 
         let menu = NSMenu()
         // Итог за сеанс — и он же путь назад к окну: отдельного «Show Timer»
@@ -114,6 +118,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(withTitle: "Reset", action: #selector(resetProgress), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Guide", action: #selector(openGuide), keyEquivalent: "").target = self
+
+        // Тема — вложенным меню под «Guide»: выбор из трёх, который делают
+        // однажды и надолго, поэтому в первом ряду пунктов ему не место.
+        let themeItem = menu.addItem(withTitle: "Theme", action: nil, keyEquivalent: "")
+        let themeMenu = NSMenu()
+        for theme in Theme.allCases {
+            let item = themeMenu.addItem(withTitle: theme.title, action: #selector(chooseTheme(_:)),
+                                         keyEquivalent: "")
+            item.target = self
+            item.representedObject = theme
+            themeItems.append(item)
+        }
+        themeItem.submenu = themeMenu
+        syncThemeItems()
+        // Выход отбит чертой: он не из того же ряда, что «Reset» и «Guide», —
+        // промах по нему заканчивает отсчёт.
+        menu.addItem(.separator())
         menu.addItem(withTitle: "Quit", action: #selector(quit), keyEquivalent: "q").target = self
 
         // Итог считается не при сборке меню, а перед каждым показом: за время
@@ -162,6 +183,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// «Light» / «Dark» / «System» — тема оформления. Выбор сохраняется и
+    /// переживает перезапуск: сама смена уходит в `Theme.current`, а окна
+    /// перекрашиваются по оповещению — тем же путём, каким они отзываются
+    /// на переключение системной темы при выбранной «System».
+    @objc private func chooseTheme(_ sender: NSMenuItem) {
+        guard let theme = sender.representedObject as? Theme else { return }
+        Theme.current = theme
+    }
+
+    /// Ставит галочку на выбранной теме. Помечается именно выбранный пункт,
+    /// а не то, во что он разрешился: при «System» галочка стоит на «System»,
+    /// а не на «Dark», — иначе выбор было бы не видно.
+    private func syncThemeItems() {
+        for item in themeItems {
+            item.state = (item.representedObject as? Theme) == Theme.current ? .on : .off
+        }
+    }
+
+    /// Подписки на смену темы: свою — от пунктов меню, системную — от самой
+    /// системы. Вторая нужна только при выбранной «System», но приходит всегда:
+    /// проверять, слушать ли её, дороже, чем перекрасить окно в те же цвета.
+    private func observeTheme() {
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(themeChanged), name: .themeDidChange, object: nil)
+        // Системную смену темы приложение узнаёт только этим оповещением —
+        // и через `DistributedNotificationCenter`, а не свой центр: посылает
+        // его другой процесс.
+        DistributedNotificationCenter.default.addObserver(
+            self, selector: #selector(systemThemeChanged),
+            name: Notification.Name("AppleInterfaceThemeChangedNotification"), object: nil)
+    }
+
+    /// Системная тема переключилась. Перекрашиваемся не сразу: в момент
+    /// оповещения `NSApp.effectiveAppearance` ещё отдаёт прежнюю тему, и
+    /// посчитанные по нему цвета были бы вчерашними.
+    @objc private func systemThemeChanged() {
+        DispatchQueue.main.async { [weak self] in
+            guard Theme.current == .system else { return }
+            self?.themeChanged()
+        }
+    }
+
+    @objc private func themeChanged() {
+        controller?.applyTheme()
+        guideController?.applyTheme()
+        syncThemeItems()
+    }
+
     /// Закрыть окно. Приложение остаётся в строке меню, отсчёт продолжает идти,
     /// вернуть окно — пункт с итогом в меню помидора.
     @objc private func closeWindow() {
@@ -207,5 +276,6 @@ extension AppDelegate: NSMenuDelegate {
         summaryItem?.title = Self.summaryTitle(halves: controller?.completedHalves ?? 0)
         muteItem?.title = Self.muteTitle(isMuted: Notifier.isMuted)
         syncModeItems()
+        syncThemeItems()
     }
 }

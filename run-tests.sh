@@ -8,8 +8,8 @@ set -uo pipefail
 cd "$(dirname "$0")"
 mkdir -p build
 FAILED=0
-APP="build/Pimer.app"
-EXEC="$APP/Contents/MacOS/Pimer"
+APP="build/Timato.app"
+EXEC="$APP/Contents/MacOS/Timato"
 
 echo "════ Сборка приложения целиком ════"
 if ./build.sh --app > /tmp/timer-build.log 2>&1; then
@@ -76,7 +76,7 @@ else
     echo "  ✗ Ф2.4 подпись не проходит проверку"; FAILED=1
 fi
 BID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Contents/Info.plist" 2>/dev/null)
-if [ "$BID" = "com.dkovalev.pimer" ]; then
+if [ "$BID" = "com.dkovalev.timato" ]; then
     echo "  ✓ Ф2.4 bundle identifier: $BID"
 else
     echo "  ✗ Ф2.4 bundle identifier: получено «$BID»"; FAILED=1
@@ -101,9 +101,9 @@ rm -rf "$LIVE_APP"
 cp -R "$APP" "$LIVE_APP"
 if swiftc -O -parse-as-library -DLIVE_CHECK -target arm64-apple-macos13.0 \
         Sources/*.swift Tests/LiveInterfaceCheck.swift \
-        -o "$LIVE_APP/Contents/MacOS/Pimer" > /tmp/timer-live.log 2>&1; then
+        -o "$LIVE_APP/Contents/MacOS/Timato" > /tmp/timer-live.log 2>&1; then
     codesign --force --sign - "$LIVE_APP" >/dev/null 2>&1
-    "$LIVE_APP/Contents/MacOS/Pimer" || FAILED=1
+    "$LIVE_APP/Contents/MacOS/Timato" || FAILED=1
 else
     echo "  ✗ живая проверка не собралась:"
     tail -10 /tmp/timer-live.log | sed 's/^/     /'
@@ -115,26 +115,26 @@ echo
 # «Resource temporarily unavailable», и проверка врала бы про сломанный DMG.
 detach_stale_image() {
     hdiutil info 2>/dev/null \
-        | awk '/^image-path/ {p=$3} /^\/dev\/disk/ {if (index(p, "dist/Pimer.dmg") > 0) print $1}' \
+        | awk '/^image-path/ {p=$3} /^\/dev\/disk/ {if (index(p, "dist/Timato.dmg") > 0) print $1}' \
         | while read -r dev; do hdiutil detach "$dev" -force -quiet 2>/dev/null || true; done
 }
 
 echo "════ Ф3.1–Ф3.3 · DMG ════"
 detach_stale_image
-if ./build.sh > /tmp/timer-dmg.log 2>&1 && [ -f "dist/Pimer.dmg" ]; then
-    echo "  ✓ Ф3.1 ./build.sh создал dist/Pimer.dmg ($(du -h dist/Pimer.dmg | cut -f1))"
+if ./build.sh > /tmp/timer-dmg.log 2>&1 && [ -f "dist/Timato.dmg" ]; then
+    echo "  ✓ Ф3.1 ./build.sh создал dist/Timato.dmg ($(du -h dist/Timato.dmg | cut -f1))"
 else
     echo "  ✗ Ф3.1 DMG не собрался"; FAILED=1
 fi
-MP=$(hdiutil attach "dist/Pimer.dmg" -nobrowse -readonly 2>/dev/null | grep -o '/Volumes/.*$' | head -1)
+MP=$(hdiutil attach "dist/Timato.dmg" -nobrowse -readonly 2>/dev/null | grep -o '/Volumes/.*$' | head -1)
 if [ -z "$MP" ]; then detach_stale_image; sleep 0.5
-    MP=$(hdiutil attach "dist/Pimer.dmg" -nobrowse -readonly 2>/dev/null | grep -o '/Volumes/.*$' | head -1)
+    MP=$(hdiutil attach "dist/Timato.dmg" -nobrowse -readonly 2>/dev/null | grep -o '/Volumes/.*$' | head -1)
 fi
 if [ -n "$MP" ]; then
-    if [ -d "$MP/Pimer.app" ]; then echo "  ✓ Ф3.2 внутри образа есть Pimer.app"; else echo "  ✗ Ф3.2 в образе нет Pimer.app"; FAILED=1; fi
+    if [ -d "$MP/Timato.app" ]; then echo "  ✓ Ф3.2 внутри образа есть Timato.app"; else echo "  ✗ Ф3.2 в образе нет Timato.app"; FAILED=1; fi
     if [ -L "$MP/Applications" ]; then echo "  ✓ Ф3.2 внутри образа есть ссылка на /Applications"; else echo "  ✗ Ф3.2 в образе нет ссылки на /Applications"; FAILED=1; fi
     # Проверяем именно копию из образа: раздаётся она, а не build/.
-    DMG_ARCHS=$(lipo -archs "$MP/Pimer.app/Contents/MacOS/Pimer" 2>/dev/null)
+    DMG_ARCHS=$(lipo -archs "$MP/Timato.app/Contents/MacOS/Timato" 2>/dev/null)
     if [[ "$DMG_ARCHS" == *arm64* && "$DMG_ARCHS" == *x86_64* ]]; then
         echo "  ✓ Ф3.2 приложение в образе universal: $DMG_ARCHS"
     else
@@ -142,13 +142,13 @@ if [ -n "$MP" ]; then
     fi
     # Ф3.3: запускаем именно ту копию, что лежит в образе.
     rm -rf /tmp/timer-from-dmg && mkdir -p /tmp/timer-from-dmg
-    cp -R "$MP/Pimer.app" /tmp/timer-from-dmg/ 2>/dev/null
+    cp -R "$MP/Timato.app" /tmp/timer-from-dmg/ 2>/dev/null
     hdiutil detach "$MP" -quiet 2>/dev/null
-    open /tmp/timer-from-dmg/Pimer.app 2>/dev/null
+    open /tmp/timer-from-dmg/Timato.app 2>/dev/null
     DMG_PID=""
     for _ in $(seq 1 20); do
         sleep 0.3
-        DMG_PID=$(pgrep -f "/tmp/timer-from-dmg/Pimer.app/Contents/MacOS/Pimer" | head -1)
+        DMG_PID=$(pgrep -f "/tmp/timer-from-dmg/Timato.app/Contents/MacOS/Timato" | head -1)
         [ -n "$DMG_PID" ] && break
     done
     if [ -n "$DMG_PID" ]; then
@@ -156,7 +156,7 @@ if [ -n "$MP" ]; then
     else
         echo "  ✗ Ф3.3 приложение из образа не запустилось"; FAILED=1
     fi
-    pkill -f "/tmp/timer-from-dmg/Pimer.app/Contents/MacOS/Pimer" 2>/dev/null
+    pkill -f "/tmp/timer-from-dmg/Timato.app/Contents/MacOS/Timato" 2>/dev/null
     rm -rf /tmp/timer-from-dmg
 else
     echo "  ✗ Ф3.2 образ не монтируется"; FAILED=1

@@ -75,12 +75,20 @@ enum LiveInterfaceCheck {
             Notification(name: NSApplication.didFinishLaunchingNotification))
         pump(0.6)
 
-        guard let window = NSApp.windows.first(where: { $0.title == "Pimer" }),
+        guard let window = NSApp.windows.first(where: { $0.title == "Timato" }),
               let content = window.contentView else {
             print("  ✗ окно не создалось — проверять нечего")
             exit(1)
         }
         content.layoutSubtreeIfNeeded()
+        pump()
+
+        // Тема приходит из настроек: на светлой машине и с выбранной «Light»
+        // весь дизайн-раздел проверял бы не те цвета. Проверка идёт по тёмной
+        // теме — она в макете основная, — а светлая проверяется своим разделом
+        // («С»). Выбор человека возвращаем перед выходом: настройки общие.
+        let savedTheme = Theme.current
+        Theme.current = .dark
         pump()
 
         let root = descendants(RootView.self, of: content).first!
@@ -527,7 +535,7 @@ enum LiveInterfaceCheck {
         // сборке, и первое же программное перемещение затирало место, оставленное
         // в прошлый раз. Место «восстанавливалось» — из значения, записанного
         // секунду назад тем же запуском.
-        let frameKey = "NSWindow Frame " + (window.frameAutosaveName.isEmpty ? "PimerWindow"
+        let frameKey = "NSWindow Frame " + (window.frameAutosaveName.isEmpty ? "TimatoWindow"
                                                                              : window.frameAutosaveName)
         check("П", "окну выдано имя для запоминания места", !window.frameAutosaveName.isEmpty,
               "имя «\(window.frameAutosaveName)»")
@@ -614,10 +622,21 @@ enum LiveInterfaceCheck {
         let statusMenu = delegate.statusMenu
         let titles = statusMenu?.items.map { $0.isSeparatorItem ? "———" : $0.title } ?? []
         check("М", "пункты меню ровно те, что просили",
-              titles.count == 9 && titles[0].hasPrefix("Summary — ")
+              titles.count == 11 && titles[0].hasPrefix("Summary — ")
               && Array(titles.dropFirst()) == ["Mute", "———", "Always Full", "Adaptive",
-                                               "———", "Reset", "Guide", "Quit"], "\(titles)")
+                                               "———", "Reset", "Guide", "Theme",
+                                               "———", "Quit"], "\(titles)")
         check("М", "пункта «Show Timer» больше нет", !titles.contains("Show Timer"))
+
+        // Тема — вложенным меню под «Guide»: три пункта и галочка ровно на
+        // выбранном, а не на том, во что он разрешился.
+        let themeMenu = statusMenu?.items.first { $0.title == "Theme" }?.submenu
+        check("М", "«Theme» — выпадающий список из трёх тем",
+              themeMenu?.items.map(\.title) == ["Light", "Dark", "System"],
+              "\(themeMenu?.items.map(\.title) ?? [])")
+        check("М", "галочка стоит на выбранной теме",
+              themeMenu?.items.filter { $0.state == .on }.map(\.title) == [Theme.current.title],
+              "\(themeMenu?.items.filter { $0.state == .on }.map(\.title) ?? [])")
 
         // «Mute» — один пункт на два состояния: заголовок называет действие,
         // а не текущее положение звука.
@@ -936,7 +955,7 @@ enum LiveInterfaceCheck {
             check("Г", "высота выросла под содержимое", guide.frame.height > 300,
                   "\(guide.frame.height)")
 
-            // Одно имя у продукта. Раньше здесь стоял «Pimer», а бандл, DMG и
+            // Одно имя у продукта. Раньше здесь стоял «Timato», а бандл, DMG и
             // README звали приложение «Timer» — человек видел два разных имени.
             check("Г", "гайд зовёт продукт так же, как окно отсчёта",
                   guideText.contains(window.title), "в гайде \(guideText.prefix(2))")
@@ -971,6 +990,63 @@ enum LiveInterfaceCheck {
         button("Stop")?.performClick(nil)
         pump()
 
+        print("\nС · светлая тема")
+        // Светлая тема — один вид на все состояния: фон в ней не меняется ни
+        // на отдыхе, ни на паузе. Это и есть главное, что здесь проверяется.
+        func trackColor() -> CGColor? {
+            bar.layer?.sublayers?.first { !($0 is CAGradientLayer) }?.backgroundColor
+        }
+        Theme.current = .light
+        pump()
+        check("С", "фон экрана выбора светлый #F8F8F8", hex(backdrop()) == "#F8F8F8", hex(backdrop()))
+        check("С", "ряд черточек перекрасился под тему",
+              hex(segments.colors.done.cgColor) == "#1B1B1B"
+              && hex(segments.colors.todo.cgColor) == "#EEEEEE",
+              "\(hex(segments.colors.done.cgColor)) на \(hex(segments.colors.todo.cgColor))")
+        check("С", "кнопки выбора светлые #EEEEEE",
+              hex(button("25 min")?.layer?.backgroundColor) == "#EEEEEE",
+              hex(button("25 min")?.layer?.backgroundColor))
+
+        button("25 min")?.performClick(nil)
+        pump()
+        check("С", "фон отсчёта тот же светлый", hex(backdrop()) == "#F8F8F8", hex(backdrop()))
+        check("С", "табло тёмное #1B1B1B", hex(clock.textColor.cgColor) == "#1B1B1B",
+              hex(clock.textColor.cgColor))
+        check("С", "трек полосы светлый #EEEEEE", hex(trackColor()) == "#EEEEEE", hex(trackColor()))
+        check("С", "полоса остатка тёмная, без зелёного хвоста",
+              Palette.day.fill.allSatisfy { hex($0.cgColor) == "#1B1B1B" }
+              && Palette.day.fillStops == nil,
+              "\(Palette.day.fill.map { hex($0.cgColor) })")
+        check("С", "свечения в углу нет",
+              Palette.look(kind: .focus, paused: false, skin: .light).glow == nil)
+
+        button("Pause")?.performClick(nil)
+        pump()
+        check("С", "пауза фон не меняет", hex(backdrop()) == "#F8F8F8", hex(backdrop()))
+        check("С", "пауза видна по подсвеченным кнопкам", Palette.dayPaused.controlLifted)
+        check("С", "отдых фон тоже не меняет",
+              Palette.look(kind: .rest, paused: false, skin: .light).backdrop == Palette.day.backdrop)
+        button("Resume")?.performClick(nil)
+        button("Stop")?.performClick(nil)
+        pump()
+
+        // Гайд светлеет вместе с трекером — и на уже открытом окне тоже:
+        // контроллер гайда один на всё приложение и переживает смену темы.
+        _ = delegate.perform(NSSelectorFromString("openGuide"))
+        pump(0.5)
+        func guideBackdrop() -> CGColor? {
+            guideWindows().first?.contentView?.layer?.backgroundColor
+        }
+        check("С", "гайд в светлой теме светлый", hex(guideBackdrop()) == "#F8F8F8",
+              hex(guideBackdrop()))
+        Theme.current = .dark
+        pump(0.4)
+        check("С", "открытый гайд перекрасился обратно", hex(guideBackdrop()) == "#000000",
+              hex(guideBackdrop()))
+        guideWindows().forEach { $0.close() }
+        pump(0.3)
+        check("С", "трекер вернулся в тёмную тему", hex(backdrop()) == "#000000", hex(backdrop()))
+
         print("\nК2 · уведомление доходит до Центра")
         // Боевой `Notifier.fire` отдаёт `withCompletionHandler: nil` — ошибку
         // доставки он глотает. Здесь тот же путь, но с обработчиком, иначе
@@ -984,7 +1060,7 @@ enum LiveInterfaceCheck {
                   + "alertSetting \(settings.alertSetting.rawValue)")
         }
         check("К2", "bundle identity есть — без неё уведомления молчат",
-              Bundle.main.bundleIdentifier == "com.dkovalev.pimer",
+              Bundle.main.bundleIdentifier == "com.dkovalev.timato",
               Bundle.main.bundleIdentifier ?? "нет")
 
         let banner = UNMutableNotificationContent()
@@ -1008,6 +1084,10 @@ enum LiveInterfaceCheck {
         // За собой убираем: регресс не должен оставлять баннеры пользователю.
         center.removeDeliveredNotifications(withIdentifiers: [id])
         pump(0.3)
+
+        // Тема человека возвращается до итога: проверка не должна менять
+        // настройки приложения, чем бы она сама ни закончилась.
+        Theme.current = savedTheme
 
         print("\n" + String(repeating: "─", count: 52))
         if failures.isEmpty {

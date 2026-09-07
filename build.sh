@@ -1,13 +1,13 @@
 #!/bin/bash
-# Сборка Pimer без Xcode: только Command Line Tools.
-#   ./build.sh            собрать Pimer.app и dist/Pimer.dmg
-#   ./build.sh --app      только Pimer.app, без упаковки
+# Сборка Timato без Xcode: только Command Line Tools.
+#   ./build.sh            собрать Timato.app и dist/Timato.dmg
+#   ./build.sh --app      только Timato.app, без упаковки
 set -euo pipefail
 cd "$(dirname "$0")"
 
-APP_NAME="Pimer"
-EXEC_NAME="Pimer"
-BUNDLE_ID="com.dkovalev.pimer"
+APP_NAME="Timato"
+EXEC_NAME="Timato"
+BUNDLE_ID="com.dkovalev.timato"
 VERSION="1.0"
 # Порог системы. Ниже 13.0 не опускается, и это не осторожность, а упор в
 # инструменты: до 13.0 Swift подцепляет шимы совместимости

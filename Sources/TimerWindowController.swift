@@ -35,6 +35,11 @@ struct Look {
     /// Кнопки нарисованы так, будто на них навели, даже когда курсора нет.
     /// Так помечена пауза: остановленное время видно и по кнопкам.
     var controlLifted: Bool = false
+    /// Чем подсвечивается кнопка под курсором. На тёмном фоне это подмешанный
+    /// белый, на светлом — чёрный: осветлять кнопку, которая и так почти белая,
+    /// нечем, и под курсором она обязана темнеть.
+    var lift: NSColor = Palette.hoverLift
+    var liftFraction: CGFloat = Palette.hoverLiftFraction
     /// Тёплое свечение из-за левого верхнего угла. Есть только у идущей работы:
     /// в макете круг лежит лишь в кадрах `Session`, ни на паузе, ни на отдыхе его нет.
     var glow: NSColor? = nil
@@ -98,9 +103,56 @@ enum Palette {
                                  fill: [.white, .white],
                                  controlLifted: true)
 
+    // MARK: Светлая тема
+
+    /// Светлая тема — один вид на все состояния.
+    ///
+    /// В тёмной теме цвет фона и есть главный сигнал: работа чёрная, отдых
+    /// зелёный, пауза серая. В светлой фон не меняется вообще — ни на отдыхе,
+    /// ни на паузе, — поэтому и состояний здесь не четыре, а одно: светлое
+    /// окно, тёмное табло, тёмная полоса остатка. Пауза отличается только
+    /// подсвеченными кнопками, отдых — тем, что кнопок на нём одна.
+    ///
+    /// Зелёного хвоста у полосы тоже нет: он был предупреждением на чёрном
+    /// фоне, а на светлом полоса и так тёмная, и хвост читался бы как ошибка.
+    static let day = Look(backdrop: designColor(0xF8F8F8), text: designColor(0x1B1B1B),
+                          control: designColor(0xEEEEEE), iconIdle: designColor(0xBFBFBF),
+                          track: designColor(0xEEEEEE),
+                          fill: [designColor(0x1B1B1B), designColor(0x1B1B1B)],
+                          lift: dayLift, liftFraction: dayLiftFraction)
+
+    /// Светлая тема на паузе: те же цвета, только кнопки подсвечены — фон
+    /// в светлой теме не меняется, и метка паузы остаётся одна.
+    static let dayPaused: Look = {
+        var look = day
+        look.controlLifted = true
+        return look
+    }()
+
+    /// Чем темнеет светлая кнопка под курсором. Чёрный непрозрачный — по той
+    /// же причине, что и белый в тёмной теме: полупрозрачная подмешка сделала
+    /// бы полупрозрачной саму кнопку.
+    static let dayLift = NSColor.black
+    /// Насколько кнопка темнеет: #EEEEEE уходит в #DBDBDB — заметно на светлом
+    /// фоне, но не настолько, чтобы читаться как нажатая.
+    static let dayLiftFraction: CGFloat = 0.08
+
     /// Ряд черточек на экране выбора: закрашенное — белым, остальное — цветом трека.
     static let segmentDone = NSColor.white
     static let segmentTodo = designColor(0x282828)
+
+    /// Ряд черточек в светлой теме: закрашенное — цветом табло, остальное —
+    /// цветом трека, ровно как полоса остатка.
+    static let daySegmentDone = day.fill[0]
+    static let daySegmentTodo = day.track
+
+    /// Цвета ряда черточек для нынешней раскраски: закрашенное и остальное.
+    static func segments(_ skin: Skin) -> (done: NSColor, todo: NSColor) {
+        switch skin {
+        case .light: return (daySegmentDone, daySegmentTodo)
+        case .dark:  return (segmentDone, segmentTodo)
+        }
+    }
 
     /// Осветление кнопки под курсором — и та же метка паузы.
     ///
@@ -125,12 +177,19 @@ enum Palette {
         }
     }
 
-    static func look(kind: Kind, paused: Bool) -> Look {
-        switch (kind, paused) {
-        case (.focus, false): return focus
-        case (.focus, true):  return focusPaused
-        case (.rest, false):  return rest
-        case (.rest, true):   return restPaused
+    static func look(kind: Kind, paused: Bool, skin: Skin) -> Look {
+        switch skin {
+        case .light:
+            // Ни отдых, ни пауза фон в светлой теме не меняют, поэтому от
+            // `kind` здесь не зависит ничего: вид один на оба отсчёта.
+            return paused ? dayPaused : day
+        case .dark:
+            switch (kind, paused) {
+            case (.focus, false): return focus
+            case (.focus, true):  return focusPaused
+            case (.rest, false):  return rest
+            case (.rest, true):   return restPaused
+            }
         }
     }
 }
@@ -241,8 +300,7 @@ final class PillButton: NSButton {
         // На паузе кнопки стоят в том же осветлении, что и под курсором:
         // так `controlLifted` из палитры и задан.
         let background = hovered || look.controlLifted
-            ? look.control.blended(withFraction: Palette.hoverLiftFraction,
-                                   of: Palette.hoverLift) ?? look.control
+            ? look.control.blended(withFraction: look.liftFraction, of: look.lift) ?? look.control
             : look.control
         layer?.backgroundColor = background.cgColor
 
@@ -463,6 +521,12 @@ final class SegmentsView: NSView {
     /// решает окно, ряд только сообщает о нажатии.
     var onClick: (() -> Void)?
 
+    /// Цвета ряда: закрашенное и остальное. Приходят от окна вместе с общей
+    /// перекраской — своей темы у ряда нет.
+    var colors: (done: NSColor, todo: NSColor) = Palette.segments(.dark) {
+        didSet { needsDisplay = true }
+    }
+
     override var isFlipped: Bool { true }
 
     override var intrinsicContentSize: NSSize {
@@ -482,7 +546,7 @@ final class SegmentsView: NSView {
         for index in 0..<Presets.segments {
             let slot = rect(at: index)
             let shape = NSBezierPath(roundedRect: slot, xRadius: radius, yRadius: radius)
-            Palette.segmentTodo.setFill()
+            colors.todo.setFill()
             shape.fill()
 
             let fraction = segmentFill(index: index, filledHalves: filledHalves)
@@ -491,7 +555,7 @@ final class SegmentsView: NSView {
             // в макете: у половины черточки правый край такой же круглый, как левый.
             let done = NSRect(x: slot.minX, y: slot.minY,
                               width: slot.width * fraction, height: slot.height)
-            Palette.segmentDone.setFill()
+            colors.done.setFill()
             NSBezierPath(roundedRect: done, xRadius: radius, yRadius: radius).fill()
         }
     }
@@ -1251,7 +1315,7 @@ final class TimerWindowController: NSWindowController {
             contentRect: NSRect(origin: .zero, size: outerSize),
             styleMask: [.borderless],
             backing: .buffered, defer: false)
-        window.title = "Pimer"
+        window.title = "Timato"
         window.isReleasedWhenClosed = false
         super.init(window: window)
 
@@ -1286,7 +1350,7 @@ final class TimerWindowController: NSWindowController {
         // Системную тень заменяет своя, на слое `frameView` — так её можно
         // сделать почти невидимой, чего с системной тенью не добиться.
         window.hasShadow = false
-        window.appearance = NSAppearance(named: .darkAqua)
+        window.appearance = Theme.skin.appearance
 
         buildInterface()
         setUpFrame(margin: margin)
@@ -1313,7 +1377,7 @@ final class TimerWindowController: NSWindowController {
     }
 
     /// Под каким именем окно запоминает своё место.
-    private static let frameName = "PimerWindow"
+    private static let frameName = "TimatoWindow"
 
     /// Ставит окно туда, где его оставили, — но только если это место всё ещё
     /// на экране. Иначе окно уходит в середину экрана. Здесь же окну выдаётся
@@ -1594,17 +1658,28 @@ final class TimerWindowController: NSWindowController {
     /// Цвета, в которых окно должно быть прямо сейчас. Экран выбора всегда
     /// чёрный: отдых и пауза — свойства идущего отсчёта, а не выбора.
     private var currentLook: Look {
+        let skin = Theme.skin
         guard Screen.forState(engine.state) == .countdown else {
-            // Экран выбора — ровный чёрный: свечение в макете есть только
+            // Экран выбора — ровный фон темы: свечение в макете есть только
             // у идущего отсчёта, и менять фон под выбором нечем.
-            var choice = Palette.focus
+            var choice = Palette.look(kind: .focus, paused: false, skin: skin)
             choice.glow = nil
             return choice
         }
-        var look = Palette.look(kind: kind, paused: engine.state == .paused)
+        var look = Palette.look(kind: kind, paused: engine.state == .paused, skin: skin)
         // Свечение есть только у идущей работы — там же и живёт выбранный цвет.
         if look.glow != nil { look.glow = Palette.glow(accent) }
         return look
+    }
+
+    /// Перекрашивает окно под сменившуюся тему. Без анимации: смена темы —
+    /// не событие отсчёта, и переливаться из чёрного в светлое окну незачем.
+    ///
+    /// Ширину не трогает: тема на неё не влияет, а `applyState` свернул бы
+    /// идущий отсчёт разом, без обычной паузы перед свёртыванием.
+    func applyTheme() {
+        window?.appearance = Theme.skin.appearance
+        applyLook(animated: false)
     }
 
     /// Приводит окно в согласие с состоянием: и цвета, и ширину. Зовётся везде,
@@ -1703,6 +1778,7 @@ final class TimerWindowController: NSWindowController {
         root.setGlow(look.glow, animated: animated)
         clock.textColor = look.text
         progress.apply(look: look)
+        choiceSegments.colors = Palette.segments(Theme.skin)
         for button in presetButtons { button.apply(look: look) }
         for button in [resetButton, pauseButton, skipButton, stopButton] { button.apply(look: look) }
     }

@@ -1,6 +1,6 @@
 import AppKit
 
-/// Окно «Гайд»: короткое объяснение того, как устроен Pimer, — отдельный
+/// Окно «Гайд»: короткое объяснение того, как устроен Timato, — отдельный
 /// пункт меню поверх уже идущего таймера. Крестик закрывает только его,
 /// сам отсчёт в другом окне продолжает идти (см. `applicationShouldTerminateAfterLastWindowClosed`).
 ///
@@ -16,14 +16,57 @@ final class GuideWindowController: NSWindowController {
     /// Ширина, в которую переносятся подписи, — вся ширина окна за вычетом полей.
     private static let textWidth = contentWidth - sidePadding * 2
 
-    private static let textColor = Palette.focus.text
-    private static let mutedColor = designColor(0x9a9a9a)
-    private static let iconBackground = Palette.focus.control
-    /// Светлее, чем `Palette.focus.iconIdle`: там приглушённый цвет — подсказка,
-    /// что кнопку ещё не навели, здесь иконки не интерактивны и должны читаться сразу.
-    private static let iconTint = designColor(0xcfcfcf)
-    private static let noteBackground = designColor(0x171717)
-    private static let noteBorder = NSColor.white.withAlphaComponent(0.14)
+    /// Цвета гайда одной темы сразу. Своих состояний у окна нет — есть только
+    /// светлое и тёмное, — поэтому набор один на всё окно, в отличие от `Look`
+    /// у трекера, где на каждое состояние отсчёта свой.
+    private struct GuideLook {
+        let backdrop: NSColor
+        let text: NSColor
+        /// Подписи под заголовками: приглушённые, но читаемые.
+        let muted: NSColor
+        /// Кружок под иконкой пункта.
+        let iconBackground: NSColor
+        /// Иконка в кружке. Заметнее, чем `iconIdle` у кнопок трекера: там
+        /// приглушённый цвет — подсказка, что кнопку ещё не навели, здесь
+        /// иконки не интерактивны и должны читаться сразу.
+        let iconTint: NSColor
+        /// Заметка про пятиминутку: своя подложка с рамкой.
+        let noteBackground: NSColor
+        /// Рамка заметки — и та же черта, что делит список на две части.
+        let noteBorder: NSColor
+
+        static let night = GuideLook(backdrop: Palette.focus.backdrop,
+                                     text: Palette.focus.text,
+                                     muted: designColor(0x9a9a9a),
+                                     iconBackground: Palette.focus.control,
+                                     iconTint: designColor(0xcfcfcf),
+                                     noteBackground: designColor(0x171717),
+                                     noteBorder: NSColor.white.withAlphaComponent(0.14))
+        /// Светлый гайд собран из тех же цветов, что и светлый трекер: фон,
+        /// табло и заливка кнопок — оттуда же. Заметка на нём не темнее фона,
+        /// а светлее: на светлом подложка читается как приподнятая карточка.
+        static let day = GuideLook(backdrop: Palette.day.backdrop,
+                                   text: Palette.day.text,
+                                   muted: designColor(0x6e6e6e),
+                                   iconBackground: Palette.day.control,
+                                   iconTint: designColor(0x8e8e8e),
+                                   noteBackground: designColor(0xffffff),
+                                   noteBorder: NSColor.black.withAlphaComponent(0.10))
+
+        static func of(_ skin: Skin) -> GuideLook { skin == .light ? day : night }
+    }
+
+    /// Цвета нынешней темы. Вычисляются при каждом обращении: тему меняют на
+    /// ходу, и содержимое окна после этого собирается заново (`applyTheme`).
+    private static var look: GuideLook { GuideLook.of(Theme.skin) }
+
+    private static var backdropColor: NSColor { look.backdrop }
+    private static var textColor: NSColor { look.text }
+    private static var mutedColor: NSColor { look.muted }
+    private static var iconBackground: NSColor { look.iconBackground }
+    private static var iconTint: NSColor { look.iconTint }
+    private static var noteBackground: NSColor { look.noteBackground }
+    private static var noteBorder: NSColor { look.noteBorder }
 
     init() {
         let window = NSWindow(
@@ -33,17 +76,27 @@ final class GuideWindowController: NSWindowController {
             styleMask: [.titled, .closable],
             backing: .buffered, defer: false)
         window.title = "Guide"
-        window.appearance = NSAppearance(named: .darkAqua)
-        window.backgroundColor = .black
         window.isReleasedWhenClosed = false
         super.init(window: window)
+        applyTheme()
+    }
 
+    required init?(coder: NSCoder) { fatalError("не используется") }
+
+    /// Пересобирает окно в цветах нынешней темы. Содержимое собирается заново,
+    /// а не перекрашивается по частям: цвет здесь попадает в слои и в атрибуты
+    /// подписей при сборке, и обойти потом каждое место было бы нечем.
+    ///
+    /// Тему меняют редко, а гайд всё это время открыт — контроллер живёт один
+    /// на всё приложение (см. `openGuide`), и перекрасить его надо на месте.
+    func applyTheme() {
+        guard let window else { return }
+        window.appearance = Theme.skin.appearance
+        window.backgroundColor = Self.backdropColor
         let root = Self.buildContent()
         window.contentView = root
         Self.fitWindow(window, to: root)
     }
-
-    required init?(coder: NSCoder) { fatalError("не используется") }
 
     /// Подгоняет высоту окна под контент при зафиксированной ширине 500:
     /// ширина стоит явным констрейнтом, высота выводится из остального макета.
@@ -59,25 +112,36 @@ final class GuideWindowController: NSWindowController {
     private static func buildContent() -> NSView {
         let root = NSView()
         root.wantsLayer = true
-        root.layer?.backgroundColor = Palette.focus.backdrop.cgColor
+        root.layer?.backgroundColor = backdropColor.cgColor
 
         let brand = brandRow()
         let intro = wrappingLabel(
             "25 or 55-minute sessions.\nRest kicks in on its own after each one.",
             font: .systemFont(ofSize: 12.5), color: mutedColor, alignment: .center)
 
-        let rows = [
-            row(symbol: "clock", title: "Tap the time",
-                body: "Cycles the corner glow — green, purple, blue, red. Just for looks."),
-            row(dashesTitle: "Tap the dashes",
-                body: "Shows a reset button in place of 25 / 55 — clears the count so far."),
-            row(symbol: "hand.draw", title: "Drag it anywhere",
-                body: "Grab any part of the window and move it. Near a screen corner it " +
-                      "snaps flush — right into the corner, under the menu bar or the Dock."),
+        // Пункты про само окно. Про свечение в углу — только в тёмной теме:
+        // в светлой его нет, и рассказывать было бы не о чем.
+        var windowRows: [NSView] = []
+        if Theme.skin == .dark {
+            windowRows.append(row(symbol: "clock", title: "Tap the time",
+                body: "Cycles the corner glow — green, purple, blue, red. Just for looks."))
+        }
+        windowRows.append(row(dashesTitle: "Tap the dashes",
+            body: "Shows a reset button in place of 25 / 55 — clears the count so far."))
+        windowRows.append(row(symbol: "hand.draw", title: "Drag it anywhere",
+            body: "Grab any part of the window and move it. Near a screen corner it " +
+                  "snaps flush — right into the corner, under the menu bar or the Dock."))
+
+        // Пункты про идущий отсчёт. Про паузу сказано то, что человек и увидит:
+        // в тёмной теме окно уходит в серый, в светлой фон не меняется вовсе,
+        // и пауза видна только по подсвеченным кнопкам.
+        let pauseBody = Theme.skin == .dark
+            ? "Stops time, window turns grey. Same button resumes."
+            : "Stops time, buttons stay lit. Same button resumes."
+        let sessionRows = [
             row(symbol: "forward.fill", title: "Finish now",
                 body: "Ends the session early — still counts as done."),
-            row(symbol: "pause.fill", title: "Pause",
-                body: "Stops time, window turns grey. Same button resumes."),
+            row(symbol: "pause.fill", title: "Pause", body: pauseBody),
             row(symbol: "stop.fill", title: "Stop",
                 body: "Cancels the session, no credit — back to picking a time."),
         ]
@@ -87,8 +151,17 @@ final class GuideWindowController: NSWindowController {
             body: "Starts on its own after each session — enough to reset before " +
                   "the next one. Only Stop works during it.")
 
-        // Полноширинные блоки — подпись, пункты, заметка — все от поля до поля.
-        let fullWidth = [intro] + rows + [note]
+        // Черта между «Drag it anywhere» и «Finish now»: выше — про само окно,
+        // ниже — про управление отсчётом. По ширине совпадает с пунктами,
+        // потому что живёт в той же полноширинной раскладке.
+        //
+        // Список сверху вниз: пункты с чертой на своём месте. Дальше раскладка
+        // работает с этой цепочкой и не знает, где в ней пункт, а где черта, —
+        // поэтому пункт, которого в светлой теме нет, ничего в ней не сдвигает.
+        let listBlocks: [NSView] = windowRows + [hairline()] + sessionRows
+
+        // Полноширинные блоки — подпись, пункты, черта, заметка — все от поля до поля.
+        let fullWidth = [intro] + listBlocks + [note]
         for view in fullWidth {
             view.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(view)
@@ -98,7 +171,7 @@ final class GuideWindowController: NSWindowController {
             ])
         }
 
-        // Лого с «Pimer» — единственная строка не во всю ширину, стоит по центру.
+        // Лого с «Timato» — единственная строка не во всю ширину, стоит по центру.
         brand.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(brand)
 
@@ -109,10 +182,10 @@ final class GuideWindowController: NSWindowController {
             intro.topAnchor.constraint(equalTo: brand.bottomAnchor, constant: 14),
             // Подпись под логотипом отделена от списка сильнее, чем пункты друг
             // от друга: она про приложение целиком, а не про очередную кнопку.
-            rows[0].topAnchor.constraint(equalTo: intro.bottomAnchor, constant: 32),
+            listBlocks[0].topAnchor.constraint(equalTo: intro.bottomAnchor, constant: 32),
             // Заметка про пятиминутку отбита от списка тем же увеличенным
             // отступом: она не пункт списка, а отдельный блок под ним.
-            note.topAnchor.constraint(equalTo: rows[rows.count - 1].bottomAnchor, constant: 34),
+            note.topAnchor.constraint(equalTo: listBlocks[listBlocks.count - 1].bottomAnchor, constant: 34),
             // Последний констрейнт до низа корня — им и определяется итоговая
             // высота окна в `fitWindow`, всё остальное выводится из него вверх по цепочке.
             note.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -bottomPadding),
@@ -121,7 +194,7 @@ final class GuideWindowController: NSWindowController {
         // Пункты списка идут друг за другом с одинаковым шагом — цепочкой,
         // а не перечислением по номерам: пункт добавляют и убирают, и раскладка
         // не должна знать, сколько их сейчас.
-        for (previous, next) in zip(rows, rows.dropFirst()) {
+        for (previous, next) in zip(listBlocks, listBlocks.dropFirst()) {
             next.topAnchor.constraint(equalTo: previous.bottomAnchor, constant: 16).isActive = true
         }
 
@@ -133,15 +206,43 @@ final class GuideWindowController: NSWindowController {
         let logo = NSImageView(image: TomatoIcon.templateImage(height: 38))
         logo.contentTintColor = textColor
 
-        let wordmark = NSTextField(labelWithString: "Pimer")
+        let wordmark = NSTextField(labelWithString: "Timato")
         wordmark.font = DisplayFont.of(size: 26)
         wordmark.textColor = textColor
 
-        let stack = NSStackView(views: [logo, wordmark])
+        // Слот высотой в лого держит выравнивание по центру, а надпись внутри
+        // него опущена на 4pt: у пиксельного шрифта оптический центр строки
+        // чуть выше геометрического, и без этой поправки слово «висит».
+        let wordmarkSlot = NSView()
+        wordmarkSlot.translatesAutoresizingMaskIntoConstraints = false
+        wordmark.translatesAutoresizingMaskIntoConstraints = false
+        wordmarkSlot.addSubview(wordmark)
+        NSLayoutConstraint.activate([
+            wordmark.leadingAnchor.constraint(equalTo: wordmarkSlot.leadingAnchor),
+            wordmark.trailingAnchor.constraint(equalTo: wordmarkSlot.trailingAnchor),
+            wordmark.centerYAnchor.constraint(equalTo: wordmarkSlot.centerYAnchor, constant: 4),
+        ])
+
+        let stack = NSStackView(views: [logo, wordmarkSlot])
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 10
+
+        // Высоту связываем только теперь: до попадания в стек у view нет общего
+        // предка, и AppKit роняет раскладку с «no common ancestor».
+        wordmarkSlot.heightAnchor.constraint(equalTo: logo.heightAnchor).isActive = true
         return stack
+    }
+
+    /// Разделительная черта в одну точку: разбивает список на смысловые части,
+    /// не занимая места, — отступы вокруг задаёт сама раскладка списка.
+    private static func hairline() -> NSView {
+        let line = NSView()
+        line.wantsLayer = true
+        line.layer?.backgroundColor = noteBorder.cgColor
+        line.translatesAutoresizingMaskIntoConstraints = false
+        line.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        return line
     }
 
     /// Подпись, которая переносится по словам в заданную ширину, — вместо
