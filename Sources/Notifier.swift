@@ -49,7 +49,7 @@ enum Notifier {
         let content = UNMutableNotificationContent()
         content.title = kind == .focus ? "Time for a break" : "Break is over"
         var body = kind == .focus
-            ? "\(minutes) min done — \(Presets.rest) min break started"
+            ? "\(minutes) min done — \(Presets.restAfter(minutes: minutes)) min break started"
             : "\(minutes) min break finished"
         // Честно говорим, что звонок задним числом: таймер дошёл до нуля во сне.
         if let late = lateSuffix(overdue) { body += " · \(late)" }

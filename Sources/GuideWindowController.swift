@@ -30,7 +30,7 @@ final class GuideWindowController: NSWindowController {
         /// приглушённый цвет — подсказка, что кнопку ещё не навели, здесь
         /// иконки не интерактивны и должны читаться сразу.
         let iconTint: NSColor
-        /// Заметка про пятиминутку: своя подложка с рамкой.
+        /// Заметка про отдых: своя подложка с рамкой.
         let noteBackground: NSColor
         /// Рамка заметки — и та же черта, что делит список на две части.
         let noteBorder: NSColor
@@ -116,7 +116,7 @@ final class GuideWindowController: NSWindowController {
 
         let brand = brandRow()
         let intro = wrappingLabel(
-            "25 or 55-minute sessions.\nRest kicks in on its own after each one.",
+            "25 or 50-minute sessions.\nRest kicks in on its own after each one.",
             font: .systemFont(ofSize: 12.5), color: mutedColor, alignment: .center)
 
         // Пункты про само окно. Свечение в углу есть только в тёмной теме,
@@ -129,7 +129,7 @@ final class GuideWindowController: NSWindowController {
                 body: Theme.skin == .dark ? glowBody : glowBody + " (Dark theme only.)"),
         ]
         windowRows.append(row(dashesTitle: "Tap the dashes",
-            body: "Shows a reset button in place of 25 / 55 — clears the count so far."))
+            body: "Shows a reset button in place of 25 / 50 — clears the count so far."))
         windowRows.append(row(symbol: "hand.draw", title: "Drag it anywhere",
             body: "Grab any part of the window and move it. Near a screen corner it " +
                   "snaps flush — right into the corner, under the menu bar or the Dock."))
@@ -146,9 +146,9 @@ final class GuideWindowController: NSWindowController {
         ]
 
         let note = noteBox(
-            title: "5-minute break",
-            body: "Starts on its own after each session — enough to reset before " +
-                  "the next one. Only Stop works during it.")
+            title: "Break after each session",
+            body: "Starts on its own — 5 minutes after 25, 10 minutes after 50. " +
+                  "Only Stop works during it.")
 
         // Черта между «Drag it anywhere» и «Finish now»: выше — про само окно,
         // ниже — про управление отсчётом. По ширине совпадает с пунктами,
@@ -183,7 +183,7 @@ final class GuideWindowController: NSWindowController {
             // Подпись под логотипом отделена от списка сильнее, чем пункты друг
             // от друга: она про приложение целиком, а не про очередную кнопку.
             listBlocks[0].topAnchor.constraint(equalTo: intro.bottomAnchor, constant: 32),
-            // Заметка про пятиминутку отбита от списка тем же увеличенным
+            // Заметка про отдых отбита от списка тем же увеличенным
             // отступом: она не пункт списка, а отдельный блок под ним.
             note.topAnchor.constraint(equalTo: listBlocks[listBlocks.count - 1].bottomAnchor, constant: 34),
             // Последний констрейнт до низа корня — им и определяется итоговая
@@ -327,7 +327,7 @@ final class GuideWindowController: NSWindowController {
         return container
     }
 
-    // MARK: - Заметка про пятиминутку
+    // MARK: - Заметка про отдых
 
     private static func noteBox(title: String, body: String) -> NSView {
         let box = NSView()

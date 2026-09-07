@@ -142,7 +142,7 @@ enum LiveInterfaceCheck {
         }
 
         print("\nЭкран выбора при открытии")
-        check("К5", "варианты на экране — ровно 25 и 55", visiblePresets() == [25, 55],
+        check("К5", "варианты на экране — ровно 25 и 50", visiblePresets() == [25, 50],
               "видно \(visiblePresets())")
         check("К5", "пятиминутки руками нет — она приходит сама",
               !visiblePresets().contains(5), "видно \(visiblePresets())")
@@ -200,7 +200,7 @@ enum LiveInterfaceCheck {
         button("Stop")?.performClick(nil)
         pump()
         check("К4", "вернулся экран выбора",
-              visiblePresets() == [25, 55] && !onScreen(clock), "видно \(visiblePresets())")
+              visiblePresets() == [25, 50] && !onScreen(clock), "видно \(visiblePresets())")
         check("К4", "ряд за брошенный отрезок не двинулся", segments.filledHalves == 0,
               "половинок \(segments.filledHalves)")
 
@@ -228,9 +228,32 @@ enum LiveInterfaceCheck {
               && button("Finish now").map(onScreen) != true)
         button("Stop")?.performClick(nil)
         pump()
-        check("Д1", "после отдыха снова экран выбора", visiblePresets() == [25, 55],
+        check("Д1", "после отдыха снова экран выбора", visiblePresets() == [25, 50],
               "видно \(visiblePresets())")
         check("Д2", "ряд сохранился между отрезками", segments.filledHalves == 1,
+              "половинок \(segments.filledHalves)")
+
+        // Длинный отрезок берёт длинный отдых: 50 минут — десять, а не пять.
+        button("50 min")?.performClick(nil)
+        pump()
+        button("Finish now")?.performClick(nil)
+        pump(0.8)
+        check("Д1", "после 50 минут сам встал отдых 10:00", face() == "10:00",
+              "получено «\(face())»")
+        button("Stop")?.performClick(nil)
+        pump()
+        check("Д1", "после десятиминутки снова экран выбора", visiblePresets() == [25, 50],
+              "видно \(visiblePresets())")
+        // Длинный отрезок закрасил целую черточку — возвращаем ряд к тем же
+        // половинкам, с какими сюда пришли: дальше на них считают другие проверки.
+        _ = delegate.perform(NSSelectorFromString("resetProgress"))
+        button("25 min")?.performClick(nil)
+        pump()
+        button("Finish now")?.performClick(nil)
+        pump(0.8)
+        button("Stop")?.performClick(nil)
+        pump()
+        check("Д2", "ряд вернулся к одной половинке", segments.filledHalves == 1,
               "половинок \(segments.filledHalves)")
 
         print("\nПравки из Figma")
@@ -260,13 +283,13 @@ enum LiveInterfaceCheck {
               button("Reset progress")?.frame.height == PillButton.rowHeight,
               "\(button("Reset progress")?.frame.height ?? -1)")
 
-        // 4 — 25 минут закрашивают половину черточки, 55 целую.
+        // 4 — 25 минут закрашивают половину черточки, 50 целую.
         check("Ф4", "после 25 минут закрашена половина первой черточки",
               segmentFill(index: 0, filledHalves: segments.filledHalves) == 0.5,
               "половинок \(segments.filledHalves)")
 
-        // 1 — клик по ряду показывает кнопку сброса вместо 25/55, повторный
-        // клик возвращает 25/55, а клик по самой кнопке сбрасывает прогресс.
+        // 1 — клик по ряду показывает кнопку сброса вместо 25/50, повторный
+        // клик возвращает 25/50, а клик по самой кнопке сбрасывает прогресс.
         check("Ф1", "до клика кнопка сброса скрыта",
               button("Reset progress").map(onScreen) != true)
         segments.onClick?()
@@ -279,8 +302,8 @@ enum LiveInterfaceCheck {
 
         segments.onClick?()
         pump()
-        check("Ф1", "повторный клик по штрихам вернул 25/55",
-              visiblePresets() == [25, 55] && reset.map(onScreen) != true,
+        check("Ф1", "повторный клик по штрихам вернул 25/50",
+              visiblePresets() == [25, 50] && reset.map(onScreen) != true,
               "видно \(visiblePresets())")
         check("Ф1", "и прогресс при этом не тронут", segments.filledHalves == 1,
               "половинок \(segments.filledHalves)")
@@ -292,7 +315,7 @@ enum LiveInterfaceCheck {
         check("Ф1", "клик по кнопке сбросил весь прогресс", segments.filledHalves == 0,
               "половинок \(segments.filledHalves)")
         check("Ф1", "после сброса вернулись кнопки выбора",
-              visiblePresets() == [25, 55] && reset.map(onScreen) != true,
+              visiblePresets() == [25, 50] && reset.map(onScreen) != true,
               "видно \(visiblePresets())")
 
         segments.onClick?()
@@ -398,7 +421,7 @@ enum LiveInterfaceCheck {
 
         // Б1 — клик по полосе остатка на идущем отсчёте не должен ничего менять.
         // Ряд штрихов спрятан, но лежит ровно под полосой: раньше он забирал
-        // нажатие и вываливал кнопки 25/55 поверх табло.
+        // нажатие и вываливал кнопки 25/50 поверх табло.
         button("25 min")?.performClick(nil)
         pump()
         let ticking = face()
@@ -412,7 +435,7 @@ enum LiveInterfaceCheck {
         // И тот же путь целиком, как у настоящего клика.
         segments.onClick?()
         pump()
-        check("Б1", "кнопки 25/55 не вылезли поверх отсчёта",
+        check("Б1", "кнопки 25/50 не вылезли поверх отсчёта",
               visiblePresets().isEmpty, "видно \(visiblePresets())")
         check("Б1", "кнопка сброса тоже не появилась",
               button("Reset progress").map(onScreen) != true)
@@ -685,18 +708,18 @@ enum LiveInterfaceCheck {
         button("Stop")?.performClick(nil)
         pump()
 
-        button("55 min")?.performClick(nil)
+        button("50 min")?.performClick(nil)
         pump()
         button("Finish now")?.performClick(nil)
         pump()
-        check("М", "55 минут добавляют целый час", summary() == "Summary — 1,5 h", summary())
+        check("М", "50 минут добавляют целый час", summary() == "Summary — 1,5 h", summary())
         button("Stop")?.performClick(nil)
         pump()
 
         // Итог не обнуляется вместе с рядом: ряд показывает круг, итог — сумму
         // за весь сеанс. Догоняем ряд до края и проверяем, что итог идёт дальше.
         for _ in 0..<3 {
-            button("55 min")?.performClick(nil)
+            button("50 min")?.performClick(nil)
             pump()
             button("Finish now")?.performClick(nil)
             pump()
@@ -708,7 +731,7 @@ enum LiveInterfaceCheck {
         check("М", "итог уже больше, чем показывает ряд", summary() == "Summary — 4,5 h", summary())
 
         // Следующий отрезок начинает ряд заново — а итог просто растёт дальше.
-        button("55 min")?.performClick(nil)
+        button("50 min")?.performClick(nil)
         pump()
         button("Finish now")?.performClick(nil)
         pump()
@@ -1163,7 +1186,7 @@ enum LiveInterfaceCheck {
 
         let banner = UNMutableNotificationContent()
         banner.title = "Time for a break"
-        banner.body = "25 min done — \(Presets.rest) min break started"
+        banner.body = "25 min done — \(Presets.restAfter(minutes: 25)) min break started"
         let id = "live-check-" + UUID().uuidString
         var addError: Error??
         center.add(UNNotificationRequest(identifier: id, content: banner, trigger: nil)) { error in

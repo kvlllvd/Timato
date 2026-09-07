@@ -47,7 +47,7 @@ enum EngineTests {
             let clock = FakeClock()
             let e = TimerEngine(now: { clock.now })
             e.start(seconds: 55 * 60)
-            for _ in 0..<3300 { clock.advance(1); e.tick() }   // 55 минут по секунде
+            for _ in 0..<3300 { clock.advance(1); e.tick() }   // 50 минут по секунде
             check("Ф1.1", "после 3300 тиков по секунде остаток ровно 0",
                   e.remaining == 0, "получено \(e.remaining)")
         }
@@ -129,7 +129,7 @@ enum EngineTests {
             let e = TimerEngine(now: { clock.now })
 
             check("Ф2.2", "при открытии показан экран выбора",
-                  Screen.forState(e.state) == .choice(options: [25, 55]),
+                  Screen.forState(e.state) == .choice(options: [25, 50]),
                   "получено \(Screen.forState(e.state))")
             check("Ф2.2", "при открытии вариантов ровно два",
                   Screen.forState(e.state).options.count == 2,
@@ -145,15 +145,15 @@ enum EngineTests {
 
             clock.advance(10); e.tick()
             check("Ф2.2", "сразу после звонка снова показан экран выбора",
-                  Screen.forState(e.state) == .choice(options: [25, 55]),
+                  Screen.forState(e.state) == .choice(options: [25, 50]),
                   "получено \(Screen.forState(e.state))")
             check("Ф2.2", "после звонка вариантов ровно два, те же самые",
-                  Screen.forState(e.state).options == [25, 55],
+                  Screen.forState(e.state).options == [25, 50],
                   "получено \(Screen.forState(e.state).options)")
 
             e.reset()
             check("Ф2.2", "после сброса показан экран выбора",
-                  Screen.forState(e.state) == .choice(options: [25, 55]),
+                  Screen.forState(e.state) == .choice(options: [25, 50]),
                   "получено \(Screen.forState(e.state))")
         }
 
@@ -203,11 +203,13 @@ enum EngineTests {
         // --- работа и отдых ---
         do {
             check("Д1", "25 минут — работа", Kind.forMinutes(25) == .focus)
-            check("Д1", "55 минут — работа", Kind.forMinutes(55) == .focus)
+            check("Д1", "50 минут — работа", Kind.forMinutes(50) == .focus)
             check("Д1", "5 минут — отдых", Kind.forMinutes(5) == .rest)
+            check("Д1", "10 минут — отдых", Kind.forMinutes(10) == .rest)
             check("Д1", "после 25 минут сам включается отдых", nextAfterFinish(minutes: 25) == 5)
-            check("Д1", "после 55 минут сам включается отдых", nextAfterFinish(minutes: 55) == 5)
+            check("Д1", "после 50 минут сам включается отдых на 10", nextAfterFinish(minutes: 50) == 10)
             check("Д1", "после отдыха ничего не запускается", nextAfterFinish(minutes: 5) == nil)
+            check("Д1", "после десятиминутки ничего не запускается", nextAfterFinish(minutes: 10) == nil)
         }
 
         // --- черточки: всегда четыре, счёт в половинках ---
@@ -216,7 +218,7 @@ enum EngineTests {
             check("Д2", "ёмкость ряда — восемь половинок", Segments.capacity == 8)
 
             check("Д2", "25 минут закрашивают половину", Segments.credit(minutes: 25) == 1)
-            check("Д2", "55 минут закрашивают целую", Segments.credit(minutes: 55) == 2)
+            check("Д2", "50 минут закрашивают целую", Segments.credit(minutes: 50) == 2)
             check("Д2", "отдых не закрашивает ничего", Segments.credit(minutes: 5) == 0)
 
             check("Д2", "две сессии по 25 — одна целая черточка",
@@ -225,19 +227,19 @@ enum EngineTests {
 
             // Полный ряд стоит на экране до конца следующего отрезка, и уже тот
             // начинает его заново — иначе четыре закрашенные черточки не увидеть.
-            check("Д2", "четыре по 55 заполняют ряд целиком",
-                  (0..<4).reduce(0) { row, _ in Segments.advance(row, minutes: 55) } == 8)
-            check("Д2", "после полного ряда следующие 55 начинают ряд заново",
-                  Segments.advance(8, minutes: 55) == 2)
+            check("Д2", "четыре по 50 заполняют ряд целиком",
+                  (0..<4).reduce(0) { row, _ in Segments.advance(row, minutes: 50) } == 8)
+            check("Д2", "после полного ряда следующие 50 начинают ряд заново",
+                  Segments.advance(8, minutes: 50) == 2)
             check("Д2", "после полного ряда следующие 25 дают половину",
                   Segments.advance(8, minutes: 25) == 1)
-            check("Д2", "ряд не переполняется", Segments.advance(7, minutes: 55) == 8)
+            check("Д2", "ряд не переполняется", Segments.advance(7, minutes: 50) == 8)
 
             check("Д2", "на пустом ряду первая черточка пуста",
                   segmentFill(index: 0, filledHalves: 0) == 0)
             check("Д2", "одна сессия 25 — первая черточка наполовину",
                   segmentFill(index: 0, filledHalves: 1) == 0.5)
-            check("Д2", "одна сессия 55 — первая черточка целиком",
+            check("Д2", "одна сессия 50 — первая черточка целиком",
                   segmentFill(index: 0, filledHalves: 2) == 1)
             check("Д2", "вторая черточка ждёт своей очереди",
                   segmentFill(index: 1, filledHalves: 2) == 0)

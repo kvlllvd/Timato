@@ -234,7 +234,7 @@ final class PillButton: NSButton {
     /// и на квадратные кнопки отсчёта.
     static let cornerRadius: CGFloat = 4
 
-    /// Высота ряда кнопок на экране выбора из макета: и пилюли 25/55,
+    /// Высота ряда кнопок на экране выбора из макета: и пилюли 25/50,
     /// и кнопка сброса, которая встаёт на их место.
     static let rowHeight: CGFloat = 40
 
@@ -537,7 +537,7 @@ final class ProgressBar: TrackerView {
 /// Ряд черточек под цифрами: четыре штуки, растянутые на всю ширину окна.
 ///
 /// Считает не отрезки, а половинки: 25 минут закрашивают половину черточки,
-/// 55 — целую. Клик по ряду переключает кнопку сброса на месте кнопок выбора:
+/// 50 — целую. Клик по ряду переключает кнопку сброса на месте кнопок выбора:
 /// ряд сам по себе ничего не сбрасывает, сброс — дело кнопки.
 final class SegmentsView: TrackerView {
     /// Зазор между черточками из макета. Сама ширина черточки не задана —
@@ -1269,7 +1269,7 @@ final class TimerWindowController: NSWindowController {
 
     /// Зачем идёт текущий отсчёт: работа или отдых.
     private var kind: Kind = .focus
-    /// Ряд черточек в половинках: 25 минут — половина, 55 — целая.
+    /// Ряд черточек в половинках: 25 минут — половина, 50 — целая.
     /// Заполнился весь ряд — следующий отрезок начинает его заново.
     private var filledHalves = 0
     /// Всё отработанное за сеанс, тоже в половинках. В отличие от ряда,
@@ -1555,13 +1555,13 @@ final class TimerWindowController: NSWindowController {
     private func buildInterface() {
         root.wantsLayer = true
 
-        // Варианты — только рабочие: пятиминутка приходит сама после отрезка,
+        // Варианты — только рабочие: отдых приходит сам после отрезка,
         // выбирать её руками незачем.
         presetButtons = Presets.minutes.map { minutes in
             PillButton(minutes: minutes, target: self, action: #selector(presetTapped(_:)))
         }
         // Кнопки выбора не держат ширину окна. Их ряд растянут от поля до поля,
-        // и своей шириной «25 min» + «55 min» задавал окну нижнюю границу в 164
+        // и своей шириной «25 min» + «50 min» задавал окну нижнюю границу в 164
         // точки — ниже неё окно не сжималось, и ёмкий вид не доходил до 136.
         // На экране выбора ничего не меняется: там ширину кнопкам всё равно
         // раздаёт `fillEqually`, а не их содержимое.
@@ -1668,7 +1668,7 @@ final class TimerWindowController: NSWindowController {
         // 128 при отступе 16 справа, иконка по центру.
         stopButton.setWidth(kind == .rest ? Self.restStopWidth : Self.controlSize)
         // Отсчёт начался — кнопке сброса здесь не место, и в следующий раз
-        // экран выбора открывается с кнопками 25/55, а не с ней.
+        // экран выбора открывается с кнопками 25/50, а не с ней.
         resetShown = false
         choiceStack.isHidden = true
         choiceSegments.isHidden = true
@@ -1830,7 +1830,7 @@ final class TimerWindowController: NSWindowController {
     /// не показывается, даже если её просили.
     private func syncResetButton() {
         // Кнопками выбора распоряжается только экран выбора. Иначе сюда можно
-        // было прийти во время отсчёта и показать 25/55 поверх табло.
+        // было прийти во время отсчёта и показать 25/50 поверх табло.
         let onChoice = Screen.forState(engine.state) != .countdown
         let visible = resetShown && filledHalves > 0 && onChoice
         resetButton.isHidden = !visible
@@ -1838,8 +1838,8 @@ final class TimerWindowController: NSWindowController {
         choiceStack.isHidden = visible
     }
 
-    /// Клик по ряду черточек: первый показывает кнопку сброса вместо 25/55,
-    /// второй возвращает 25/55, ничего не сбрасывая.
+    /// Клик по ряду черточек: первый показывает кнопку сброса вместо 25/50,
+    /// второй возвращает 25/50, ничего не сбрасывая.
     private func toggleReset() {
         resetShown.toggle()
         syncResetButton()
@@ -1857,7 +1857,7 @@ final class TimerWindowController: NSWindowController {
     }
 
     /// Сброс по кнопке. Прогресса больше нет, поэтому кнопке нечего предлагать
-    /// и на её место сразу возвращаются 25/55.
+    /// и на её место сразу возвращаются 25/50.
     @objc private func resetTapped() {
         resetProgress()
     }
