@@ -355,9 +355,9 @@ enum EngineTests {
                           }
                       }
                   })
-            check("В", "в меню два вида, полный первым",
+            check("В", "в меню два вида, адаптивный первым",
                   ViewMode.allCases.count == 2
-                  && ViewMode.allCases.map(\.title) == ["Always Full", "Adaptive"],
+                  && ViewMode.allCases.map(\.title) == ["Adaptive", "Always Full"],
                   "\(ViewMode.allCases.map(\.title))")
             check("В", "по умолчанию выбран полный вид", ViewMode.default == .alwaysFull,
                   "\(ViewMode.default)")

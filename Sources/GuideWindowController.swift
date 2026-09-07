@@ -157,7 +157,8 @@ final class GuideWindowController: NSWindowController {
         // Список сверху вниз: пункты с чертой на своём месте. Дальше раскладка
         // работает с этой цепочкой и не знает, где в ней пункт, а где черта, —
         // поэтому пункт, которого в светлой теме нет, ничего в ней не сдвигает.
-        let listBlocks: [NSView] = windowRows + [hairline()] + sessionRows
+        let divider = hairline()
+        let listBlocks: [NSView] = windowRows + [divider] + sessionRows
 
         // Полноширинные блоки — подпись, пункты, черта, заметка — все от поля до поля.
         let fullWidth = [intro] + listBlocks + [note]
@@ -193,8 +194,15 @@ final class GuideWindowController: NSWindowController {
         // Пункты списка идут друг за другом с одинаковым шагом — цепочкой,
         // а не перечислением по номерам: пункт добавляют и убирают, и раскладка
         // не должна знать, сколько их сейчас.
+        //
+        // Черта из этого шага выбивается: вокруг неё по 8 точек сверх обычного
+        // отступа. С общим шагом она стоит от соседних пунктов ровно так же,
+        // как они друг от друга, и читается очередной строкой списка, а не
+        // границей между его частями.
         for (previous, next) in zip(listBlocks, listBlocks.dropFirst()) {
-            next.topAnchor.constraint(equalTo: previous.bottomAnchor, constant: 16).isActive = true
+            let touchesDivider = previous === divider || next === divider
+            next.topAnchor.constraint(equalTo: previous.bottomAnchor,
+                                      constant: touchesDivider ? 24 : 16).isActive = true
         }
 
         return root

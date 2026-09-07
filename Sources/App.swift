@@ -104,23 +104,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
-        // Вид трекера — своей группой между звуком и действиями: это тоже
-        // состояние приложения, но выбирают здесь из двух, а не включают одно.
+        // Вид трекера и тема — своей группой и оба вложенным меню: это не
+        // действия, а два выбора «каким окну быть». Их делают однажды и надолго,
+        // поэтому наружу вынесены не сами варианты, а два заголовка.
+        let modeItem = menu.addItem(withTitle: "Mode", action: nil, keyEquivalent: "")
+        let modeMenu = NSMenu()
         for mode in ViewMode.allCases {
-            let item = menu.addItem(withTitle: mode.title, action: #selector(chooseMode(_:)),
-                                    keyEquivalent: "")
+            let item = modeMenu.addItem(withTitle: mode.title, action: #selector(chooseMode(_:)),
+                                        keyEquivalent: "")
             item.target = self
             item.representedObject = mode
             modeItems.append(item)
         }
+        modeItem.submenu = modeMenu
         syncModeItems()
 
-        menu.addItem(.separator())
-        menu.addItem(withTitle: "Reset", action: #selector(resetProgress), keyEquivalent: "").target = self
-        menu.addItem(withTitle: "Guide", action: #selector(openGuide), keyEquivalent: "").target = self
-
-        // Тема — вложенным меню под «Guide»: выбор из трёх, который делают
-        // однажды и надолго, поэтому в первом ряду пунктов ему не место.
         let themeItem = menu.addItem(withTitle: "Theme", action: nil, keyEquivalent: "")
         let themeMenu = NSMenu()
         for theme in Theme.allCases {
@@ -132,9 +130,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         themeItem.submenu = themeMenu
         syncThemeItems()
-        // Выход отбит чертой: он не из того же ряда, что «Reset» и «Guide», —
-        // промах по нему заканчивает отсчёт.
+
+        // Справка — сама по себе: по ней не промахиваются во вред, но и к двум
+        // выборам выше она отношения не имеет.
         menu.addItem(.separator())
+        menu.addItem(withTitle: "Guide", action: #selector(openGuide), keyEquivalent: "").target = self
+
+        // Последняя группа — то, чем заканчивают: сброс стирает весь сеанс,
+        // выход гасит отсчёт. Оба отбиты чертой от «Guide», чтобы промах мимо
+        // справки не стоил набранных часов.
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Reset", action: #selector(resetProgress), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Quit", action: #selector(quit), keyEquivalent: "q").target = self
 
         // Итог считается не при сборке меню, а перед каждым показом: за время

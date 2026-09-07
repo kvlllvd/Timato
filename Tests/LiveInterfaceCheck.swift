@@ -621,14 +621,21 @@ enum LiveInterfaceCheck {
 
         let statusMenu = delegate.statusMenu
         let titles = statusMenu?.items.map { $0.isSeparatorItem ? "———" : $0.title } ?? []
-        check("М", "пункты меню ровно те, что просили",
-              titles.count == 11 && titles[0].hasPrefix("Summary — ")
-              && Array(titles.dropFirst()) == ["Mute", "———", "Always Full", "Adaptive",
-                                               "———", "Reset", "Guide", "Theme",
-                                               "———", "Quit"], "\(titles)")
+        check("М", "пункты меню ровно те, что просили, и в том же порядке",
+              titles.count == 10 && titles[0].hasPrefix("Summary — ")
+              && Array(titles.dropFirst()) == ["Mute", "———", "Mode", "Theme",
+                                               "———", "Guide",
+                                               "———", "Reset", "Quit"], "\(titles)")
         check("М", "пункта «Show Timer» больше нет", !titles.contains("Show Timer"))
 
-        // Тема — вложенным меню под «Guide»: три пункта и галочка ровно на
+        // Вид трекера — вложенным меню: наружу вынесен один заголовок, оба
+        // варианта внутри, адаптивный первым.
+        let modeSubmenu = statusMenu?.items.first { $0.title == "Mode" }?.submenu
+        check("М", "«Mode» — выпадающий список из двух видов",
+              modeSubmenu?.items.map(\.title) == ["Adaptive", "Always Full"],
+              "\(modeSubmenu?.items.map(\.title) ?? [])")
+
+        // Тема — таким же вложенным меню рядом: три пункта и галочка ровно на
         // выбранном, а не на том, во что он разрешился.
         let themeMenu = statusMenu?.items.first { $0.title == "Theme" }?.submenu
         check("М", "«Theme» — выпадающий список из трёх тем",
@@ -734,7 +741,9 @@ enum LiveInterfaceCheck {
         let compact = TimerWindowController.compactWidth
         /// Сколько ждать свёртывания: пауза плюс запас на саму анимацию.
         let foldWait = TimerWindowController.foldDelay + 2
-        func modeItem(_ title: String) -> NSMenuItem? { statusMenu?.items.first { $0.title == title } }
+        func modeItem(_ title: String) -> NSMenuItem? {
+            statusMenu?.items.first { $0.title == "Mode" }?.submenu?.items.first { $0.title == title }
+        }
         /// Выбор пункта вида — тем же путём, каким его выбирает мышь.
         func choose(_ title: String) {
             guard let item = modeItem(title) else { return }
@@ -931,6 +940,36 @@ enum LiveInterfaceCheck {
                   "уехало на \(movedByClock)")
         }
 
+        // Трекер тащат прямо из рабочего окна, не активируя его отдельным
+        // кликом. Проверка не перечисляет классы, а щупает пилюлю сеткой точек:
+        // нажатие достаётся тому виду, что лежит под курсором, и любая точка,
+        // чей вид от первого нажатия отказался, — это место, за которое окно
+        // с первого раза не сдвинуть. Так ловятся и служебные виды AppKit
+        // внутри кнопок: их никто не писал, а под курсор они попадают.
+        func firstMouseHoles() -> [String] {
+            var holes: Set<String> = []
+            for x in stride(from: content.frame.minX, to: content.frame.maxX, by: 3) {
+                for y in stride(from: content.frame.minY, to: content.frame.maxY, by: 3) {
+                    guard let hit = content.hitTest(NSPoint(x: x, y: y)),
+                          !hit.acceptsFirstMouse(for: nil) else { continue }
+                    holes.insert(String(describing: type(of: hit)))
+                }
+            }
+            return holes.sorted()
+        }
+
+        let choiceHoles = firstMouseHoles()
+        check("Т", "на экране выбора первый клик уже тащит, а не активирует",
+              choiceHoles.isEmpty, "первое нажатие теряют: \(choiceHoles.joined(separator: ", "))")
+
+        button("25 min")?.performClick(nil)
+        pump()
+        let clockHoles = firstMouseHoles()
+        check("Т", "на отсчёте первый клик уже тащит, а не активирует",
+              clockHoles.isEmpty, "первое нажатие теряют: \(clockHoles.joined(separator: ", "))")
+        button("Stop")?.performClick(nil)
+        pump()
+
         print("\nГ · окно «Guide»")
         // Гайд — единственное место, где кнопки названы словами: сами кнопки
         // отсчёта иконочные, и как они называются, человек узнаёт только здесь.
@@ -954,6 +993,29 @@ enum LiveInterfaceCheck {
             // окно схлопывается в полосу — и это надо ловить.
             check("Г", "высота выросла под содержимое", guide.frame.height > 300,
                   "\(guide.frame.height)")
+
+            // Черта в списке дышит свободнее пунктов: по 8 точек сверх обычного
+            // шага сверху и снизу. С общим шагом она стоит от соседей ровно так
+            // же, как они друг от друга, и читается очередной строкой списка,
+            // а не границей между «про окно» и «про отсчёт». Меряется по живой
+            // раскладке, а не по константам: константу правят и в одном месте.
+            if let divider = descendants(NSView.self, of: guideContent)
+                .first(where: { $0.frame.height == 1 && $0.frame.width > 100 }),
+               let list = divider.superview {
+                // Полноширинные блоки списка сверху вниз. Лого уже, чем они,
+                // и в ряд не попадает.
+                let blocks = list.subviews
+                    .filter { $0.frame.width == divider.frame.width }
+                    .sorted { $0.frame.minY < $1.frame.minY }
+                let gaps = zip(blocks, blocks.dropFirst()).map { $1.frame.minY - $0.frame.maxY }
+                // Обычный шаг — самый частый и самый тесный: подпись и заметка
+                // отбиты от списка сильнее, черта тоже.
+                let step = gaps.min() ?? 0
+                let index = blocks.firstIndex(of: divider) ?? 0
+                let around = index > 0 && index < gaps.count ? [gaps[index - 1], gaps[index]] : []
+                check("Г", "черта отбита от пунктов на 8 точек сверх обычного шага",
+                      step == 16 && around == [24, 24], "шаг \(step), вокруг черты \(around)")
+            }
 
             // Одно имя у продукта. Раньше здесь стоял «Timato», а бандл, DMG и
             // README звали приложение «Timer» — человек видел два разных имени.

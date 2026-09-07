@@ -199,6 +199,30 @@ enum Palette {
     }
 }
 
+// MARK: - Первый клик
+
+/// Вид трекера — и заодно уговор о том, что трекер не надо сперва активировать.
+///
+/// По умолчанию AppKit тратит первое нажатие по окну неактивного приложения
+/// на одну только активацию и до вида его не доносит. Обычному окну это на
+/// пользу: по чужому окну кликают, чтобы перейти в него, а не чтобы вслепую
+/// что-то в нём нажать. Трекер живёт иначе — в него не переходят, его двигают
+/// и жмут на него, не отрываясь от работы, и «сначала кликни, потом тащи»
+/// выходит лишним кликом на каждый перенос.
+///
+/// `acceptsFirstMouse` спрашивают у того вида, на который пришлось нажатие,
+/// а не у окна, — поэтому отвечать «да» обязаны все виды пилюли, а не один
+/// фоновый: тащат её и за табло, и за кнопки, и за полосу остатка.
+class TrackerView: NSView {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+/// Ряд кнопок. Свой класс заведён ровно ради первого клика: под курсор попадает
+/// и сам `NSStackView` — в промежутках между кнопками. См. `TrackerView`.
+final class TrackerStack: NSStackView {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
 // MARK: - Кнопка
 
 /// Кнопка из макета: пилюля на своей заливке, без системной рамки.
@@ -358,6 +382,10 @@ final class PillButton: NSButton {
     override func mouseEntered(with event: NSEvent) { hovered = true; redraw() }
     override func mouseExited(with event: NSEvent) { hovered = false; redraw() }
 
+    /// Кнопка нажимается и тащит за собой окно с первого же нажатия, без
+    /// отдельного клика на активацию. См. `TrackerView`.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     /// Трекер таскают за любое место, и кнопки не исключение: увели мышь —
     /// это перенос окна, отпустили на месте — обычное нажатие.
     ///
@@ -377,7 +405,7 @@ final class PillButton: NSButton {
 /// Ширина заливки не перерисовывается по тику — она анимируется одним линейным
 /// переходом до конца отсчёта. Поэтому движение плавное на любой частоте кадров,
 /// а процессор при этом ничего не считает.
-final class ProgressBar: NSView {
+final class ProgressBar: TrackerView {
 
     private let track = CALayer()
     private let fill = CAGradientLayer()
@@ -511,7 +539,7 @@ final class ProgressBar: NSView {
 /// Считает не отрезки, а половинки: 25 минут закрашивают половину черточки,
 /// 55 — целую. Клик по ряду переключает кнопку сброса на месте кнопок выбора:
 /// ряд сам по себе ничего не сбрасывает, сброс — дело кнопки.
-final class SegmentsView: NSView {
+final class SegmentsView: TrackerView {
     /// Зазор между черточками из макета. Сама ширина черточки не задана —
     /// она равна остатку, поделённому на четыре.
     private let gap: CGFloat = 4
@@ -603,7 +631,7 @@ final class SegmentsView: NSView {
 /// Старый глиф уезжает вверх и наружу, новый в тот же миг въезжает снизу —
 /// как створка на табло в аэропорту. Каждый разряд живёт сам по себе, поэтому
 /// в `12:00 → 11:59` двигаются только те цифры, которые правда изменились.
-final class DigitSlot: NSView {
+final class DigitSlot: TrackerView {
 
     /// Длительность съезда. Дольше — и в конце минуты цифры не успевают
     /// доехать до следующей секунды.
@@ -730,7 +758,7 @@ final class DigitSlot: NSView {
 /// Заменяет обычную надпись именно потому, что съезжать должны отдельные
 /// цифры: у `NSTextField` меняется вся строка целиком, и анимировать разряды
 /// по одному в нём нечем.
-final class FlipClockView: NSView {
+final class FlipClockView: TrackerView {
 
     private let font = DisplayFont.of(size: 36)
     private var slots: [DigitSlot] = []
@@ -840,7 +868,7 @@ func roundedPath(in rect: NSRect, radii: CornerRadii) -> CGPath {
 ///
 /// Заливка живёт в `CAShapeLayer`, а не в `draw(_:)`: перекрасить нарисованное
 /// вручную можно только скачком, а слой сам интерполирует цвет между кадрами.
-final class RootView: NSView {
+final class RootView: TrackerView {
 
     private let backdrop = CAShapeLayer()
     /// Свечение из макета: круг радиусом 181 с центром выше левого верхнего
@@ -1063,7 +1091,8 @@ final class SnappingWindow: NSWindow {
     private var reportedEdges: ScreenEdges?
 
     // У `.borderless` окна оба по умолчанию `false` — тогда первый клик по
-    // кнопке внутри только активирует окно, а не нажимает её.
+    // кнопке внутри только активирует окно, а не нажимает её. Одного этого
+    // мало: нажатию надо ещё дойти до вида — см. `TrackerView`.
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 
@@ -1193,7 +1222,7 @@ final class SnappingWindow: NSWindow {
 /// приходится пересчитывать на каждой раскладке — ширина окна меняется на ходу,
 /// когда трекер сворачивается в ёмкий вид, и застывшая тень выглядывала бы
 /// из-под свёрнутой пилюли.
-final class ShadowFrameView: NSView {
+final class ShadowFrameView: TrackerView {
     var onLayout: (() -> Void)?
 
     override func layout() {
@@ -1285,7 +1314,7 @@ final class TimerWindowController: NSWindowController {
 
     // Экран выбора
     private var presetButtons: [PillButton] = []
-    private let choiceStack = NSStackView()
+    private let choiceStack = TrackerStack()
     /// Тот же ряд засечек, что и на отсчёте: общий счёт отработанного за сеанс.
     private let choiceSegments = SegmentsView()
     /// Сброс прогресса. Лежит на месте кнопок выбора и показывается только
@@ -1304,7 +1333,7 @@ final class TimerWindowController: NSWindowController {
     /// «Стоп»: бросить отсчёт и вернуться на главный экран.
     private let stopButton = PillButton(symbol: "stop.fill", label: "Stop",
                                         target: nil, action: nil)
-    private let controlsStack = NSStackView()
+    private let controlsStack = TrackerStack()
     private let progress = ProgressBar()
 
 
