@@ -119,29 +119,28 @@ final class GuideWindowController: NSWindowController {
             "25 or 55-minute sessions.\nRest kicks in on its own after each one.",
             font: .systemFont(ofSize: 12.5), color: mutedColor, alignment: .center)
 
-        // Пункты про само окно. Про свечение в углу — только в тёмной теме:
-        // в светлой его нет, и рассказывать было бы не о чем.
-        var windowRows: [NSView] = []
-        if Theme.skin == .dark {
-            windowRows.append(row(symbol: "clock", title: "Tap the time",
-                body: "Cycles the corner glow — green, purple, blue, red. Just for looks."))
-        }
+        // Пункты про само окно. Свечение в углу есть только в тёмной теме,
+        // но пункт про него стоит в гайде всегда: в светлой теме к нему
+        // приписана оговорка — иначе выходит, что приложение умеет меньше,
+        // чем умеет, и про клик по табло человек не узнаёт вовсе.
+        let glowBody = "Cycles the corner glow — green, purple, blue, red. Just for looks."
+        var windowRows: [NSView] = [
+            row(symbol: "clock", title: "Tap the time",
+                body: Theme.skin == .dark ? glowBody : glowBody + " (Dark theme only.)"),
+        ]
         windowRows.append(row(dashesTitle: "Tap the dashes",
             body: "Shows a reset button in place of 25 / 55 — clears the count so far."))
         windowRows.append(row(symbol: "hand.draw", title: "Drag it anywhere",
             body: "Grab any part of the window and move it. Near a screen corner it " +
                   "snaps flush — right into the corner, under the menu bar or the Dock."))
 
-        // Пункты про идущий отсчёт. Про паузу сказано то, что человек и увидит:
-        // в тёмной теме окно уходит в серый, в светлой фон не меняется вовсе,
-        // и пауза видна только по подсвеченным кнопкам.
-        let pauseBody = Theme.skin == .dark
-            ? "Stops time, window turns grey. Same button resumes."
-            : "Stops time, buttons stay lit. Same button resumes."
+        // Пункты про идущий отсчёт. Про паузу текст один на обе темы: серый
+        // фон паузы от темы не зависит — как и зелёный фон отдыха.
         let sessionRows = [
             row(symbol: "forward.fill", title: "Finish now",
                 body: "Ends the session early — still counts as done."),
-            row(symbol: "pause.fill", title: "Pause", body: pauseBody),
+            row(symbol: "pause.fill", title: "Pause",
+                body: "Stops time, window turns grey. Same button resumes."),
             row(symbol: "stop.fill", title: "Stop",
                 body: "Cancels the session, no credit — back to picking a time."),
         ]

@@ -105,29 +105,21 @@ enum Palette {
 
     // MARK: Светлая тема
 
-    /// Светлая тема — один вид на все состояния.
+    /// Светлая тема: идущая работа и экран выбора.
     ///
-    /// В тёмной теме цвет фона и есть главный сигнал: работа чёрная, отдых
-    /// зелёный, пауза серая. В светлой фон не меняется вообще — ни на отдыхе,
-    /// ни на паузе, — поэтому и состояний здесь не четыре, а одно: светлое
-    /// окно, тёмное табло, тёмная полоса остатка. Пауза отличается только
-    /// подсвеченными кнопками, отдых — тем, что кнопок на нём одна.
+    /// Больше нигде её нет. Отдых остаётся зелёным, пауза — серой, ровно
+    /// такими же, как в тёмной теме: цвет фона там несёт смысл («время не
+    /// идёт», «сейчас перерыв»), и он не должен зависеть от темы. Светлая
+    /// тема меняет только тот фон, который сам ничего не говорит, — фон
+    /// работы и выбора.
     ///
-    /// Зелёного хвоста у полосы тоже нет: он был предупреждением на чёрном
-    /// фоне, а на светлом полоса и так тёмная, и хвост читался бы как ошибка.
+    /// Зелёного хвоста у полосы нет: он был предупреждением на чёрном фоне,
+    /// а на светлом полоса и так тёмная, и хвост читался бы как ошибка.
     static let day = Look(backdrop: designColor(0xF8F8F8), text: designColor(0x1B1B1B),
                           control: designColor(0xEEEEEE), iconIdle: designColor(0xBFBFBF),
                           track: designColor(0xEEEEEE),
                           fill: [designColor(0x1B1B1B), designColor(0x1B1B1B)],
                           lift: dayLift, liftFraction: dayLiftFraction)
-
-    /// Светлая тема на паузе: те же цвета, только кнопки подсвечены — фон
-    /// в светлой теме не меняется, и метка паузы остаётся одна.
-    static let dayPaused: Look = {
-        var look = day
-        look.controlLifted = true
-        return look
-    }()
 
     /// Чем темнеет светлая кнопка под курсором. Чёрный непрозрачный — по той
     /// же причине, что и белый в тёмной теме: полупрозрачная подмешка сделала
@@ -136,6 +128,19 @@ enum Palette {
     /// Насколько кнопка темнеет: #EEEEEE уходит в #DBDBDB — заметно на светлом
     /// фоне, но не настолько, чтобы читаться как нажатая.
     static let dayLiftFraction: CGFloat = 0.08
+
+    /// Тень под пилюлей: сила, размытие и сдвиг вниз.
+    ///
+    /// В тёмной теме тень — почти формальность: чёрное окно и так отделено от
+    /// чего угодно своим краем. В светлой она единственное, что отделяет
+    /// пилюлю #F8F8F8 от светлого стола под ней, поэтому тень плотнее, но
+    /// собрана теснее — небольшая и лёгкая, а не размытое пятно под окном.
+    static func shadow(_ skin: Skin) -> (opacity: Float, radius: CGFloat, drop: CGFloat) {
+        switch skin {
+        case .light: return (opacity: 0.16, radius: 5, drop: 1)
+        case .dark:  return (opacity: 0.18, radius: 7, drop: 2)
+        }
+    }
 
     /// Ряд черточек на экране выбора: закрашенное — белым, остальное — цветом трека.
     static let segmentDone = NSColor.white
@@ -178,18 +183,15 @@ enum Palette {
     }
 
     static func look(kind: Kind, paused: Bool, skin: Skin) -> Look {
-        switch skin {
-        case .light:
-            // Ни отдых, ни пауза фон в светлой теме не меняют, поэтому от
-            // `kind` здесь не зависит ничего: вид один на оба отсчёта.
-            return paused ? dayPaused : day
-        case .dark:
-            switch (kind, paused) {
-            case (.focus, false): return focus
-            case (.focus, true):  return focusPaused
-            case (.rest, false):  return rest
-            case (.rest, true):   return restPaused
-            }
+        // Светлая тема бывает ровно у идущей работы: пауза и отдых в ней те
+        // же, что и в тёмной, — серый и зелёный там говорят о состоянии,
+        // а не об оформлении.
+        if skin == .light, kind == .focus, !paused { return day }
+        switch (kind, paused) {
+        case (.focus, false): return focus
+        case (.focus, true):  return focusPaused
+        case (.rest, false):  return rest
+        case (.rest, true):   return restPaused
         }
     }
 }
@@ -1468,10 +1470,17 @@ final class TimerWindowController: NSWindowController {
     /// `layer.shadowOpacity`, если тень задать раньше, она молча пропадает.
     private func setUpShadow(margin: CGFloat) {
         frameView.layer?.shadowColor = NSColor.black.cgColor
-        frameView.layer?.shadowOpacity = 0.18
-        frameView.layer?.shadowRadius = 7
-        frameView.layer?.shadowOffset = CGSize(width: 0, height: -2)
+        applyShadow()
         updateShadowPath()
+    }
+
+    /// Ставит тень нынешней темы. Сдвиг задан вниз: у `frameView`, в отличие
+    /// от `root`, координаты не перевёрнуты, и вниз — это минус по высоте.
+    private func applyShadow() {
+        let shadow = Palette.shadow(Theme.skin)
+        frameView.layer?.shadowOpacity = shadow.opacity
+        frameView.layer?.shadowRadius = shadow.radius
+        frameView.layer?.shadowOffset = CGSize(width: 0, height: -shadow.drop)
     }
 
     /// Обнуляет скругление у углов, сошедшихся на кромке экрана, — чтобы окно
@@ -1680,6 +1689,7 @@ final class TimerWindowController: NSWindowController {
     func applyTheme() {
         window?.appearance = Theme.skin.appearance
         applyLook(animated: false)
+        applyShadow()
     }
 
     /// Приводит окно в согласие с состоянием: и цвета, и ширину. Зовётся везде,

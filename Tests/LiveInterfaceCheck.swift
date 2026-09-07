@@ -1020,15 +1020,29 @@ enum LiveInterfaceCheck {
         check("С", "свечения в углу нет",
               Palette.look(kind: .focus, paused: false, skin: .light).glow == nil)
 
+        // Пауза и отдых от темы не зависят: серый и зелёный там говорят о
+        // состоянии, а не об оформлении, — светлая тема их не касается.
         button("Pause")?.performClick(nil)
         pump()
-        check("С", "пауза фон не меняет", hex(backdrop()) == "#F8F8F8", hex(backdrop()))
-        check("С", "пауза видна по подсвеченным кнопкам", Palette.dayPaused.controlLifted)
-        check("С", "отдых фон тоже не меняет",
-              Palette.look(kind: .rest, paused: false, skin: .light).backdrop == Palette.day.backdrop)
+        check("С", "пауза серая, как и в тёмной теме", hex(backdrop()) == "#494949",
+              hex(backdrop()))
         button("Resume")?.performClick(nil)
+        pump()
+        check("С", "после продолжения фон снова светлый", hex(backdrop()) == "#F8F8F8",
+              hex(backdrop()))
+        check("С", "отдых остаётся зелёным",
+              Palette.look(kind: .rest, paused: false, skin: .light).backdrop
+              == Palette.rest.backdrop
+              && Palette.look(kind: .rest, paused: true, skin: .light).backdrop
+              == Palette.restPaused.backdrop)
+        button("Finish now")?.performClick(nil)
+        pump(0.8)
+        check("С", "и живьём: отдых в светлой теме зелёный",
+              hex(backdrop()) == hex(Palette.rest.backdrop.cgColor), hex(backdrop()))
         button("Stop")?.performClick(nil)
         pump()
+        check("С", "после отдыха вернулся светлый экран выбора",
+              hex(backdrop()) == "#F8F8F8", hex(backdrop()))
 
         // Гайд светлеет вместе с трекером — и на уже открытом окне тоже:
         // контроллер гайда один на всё приложение и переживает смену темы.
@@ -1039,6 +1053,27 @@ enum LiveInterfaceCheck {
         }
         check("С", "гайд в светлой теме светлый", hex(guideBackdrop()) == "#F8F8F8",
               hex(guideBackdrop()))
+        // Пункт про свечение из гайда не пропадает — к нему приписана оговорка:
+        // в светлой теме свечения нет, но про клик по табло человек узнать должен.
+        let lightGuideText = guideWindows().first?.contentView.map {
+            descendants(NSTextField.self, of: $0).map(\.stringValue)
+        } ?? []
+        check("С", "пункт про смену цвета в гайде остался",
+              lightGuideText.contains { $0.hasPrefix("Cycles the corner glow") },
+              "\(lightGuideText.filter { $0.contains("glow") })")
+        check("С", "и помечен как только для тёмной темы",
+              lightGuideText.contains { $0.contains("(Dark theme only.)") },
+              "\(lightGuideText.filter { $0.contains("glow") })")
+
+        // Тень: в светлой теме она плотнее и собрана теснее — иначе светлая
+        // пилюля сливается со светлым столом под ней.
+        func shadow() -> (Float, CGFloat, CGFloat) {
+            let layer = content.layer
+            return (layer?.shadowOpacity ?? 0, layer?.shadowRadius ?? 0,
+                    -(layer?.shadowOffset.height ?? 0))
+        }
+        check("С", "тень светлой темы — лёгкая и небольшая", shadow() == (0.16, 5, 1),
+              "\(shadow())")
         Theme.current = .dark
         pump(0.4)
         check("С", "открытый гайд перекрасился обратно", hex(guideBackdrop()) == "#000000",
@@ -1046,6 +1081,7 @@ enum LiveInterfaceCheck {
         guideWindows().forEach { $0.close() }
         pump(0.3)
         check("С", "трекер вернулся в тёмную тему", hex(backdrop()) == "#000000", hex(backdrop()))
+        check("С", "и тень вернулась к тёмной", shadow() == (0.18, 7, 2), "\(shadow())")
 
         print("\nК2 · уведомление доходит до Центра")
         // Боевой `Notifier.fire` отдаёт `withCompletionHandler: nil` — ошибку
