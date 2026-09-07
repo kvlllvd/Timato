@@ -137,7 +137,10 @@ enum Palette {
     /// собрана теснее — небольшая и лёгкая, а не размытое пятно под окном.
     static func shadow(_ skin: Skin) -> (opacity: Float, radius: CGFloat, drop: CGFloat) {
         switch skin {
-        case .light: return (opacity: 0.16, radius: 5, drop: 1)
+        // 0.112 — это те же 0.16 минус 30% по просьбе: тень осталась той же
+        // формы, только светлее. Ниже спускаться уже некуда: на белом столе
+        // край пилюли перестаёт читаться вовсе.
+        case .light: return (opacity: 0.112, radius: 5, drop: 1)
         case .dark:  return (opacity: 0.18, radius: 7, drop: 2)
         }
     }

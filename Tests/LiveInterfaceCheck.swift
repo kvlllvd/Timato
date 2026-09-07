@@ -1072,7 +1072,7 @@ enum LiveInterfaceCheck {
             return (layer?.shadowOpacity ?? 0, layer?.shadowRadius ?? 0,
                     -(layer?.shadowOffset.height ?? 0))
         }
-        check("С", "тень светлой темы — лёгкая и небольшая", shadow() == (0.16, 5, 1),
+        check("С", "тень светлой темы — лёгкая и небольшая", shadow() == (0.112, 5, 1),
               "\(shadow())")
         Theme.current = .dark
         pump(0.4)
