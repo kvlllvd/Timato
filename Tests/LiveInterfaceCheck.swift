@@ -529,6 +529,44 @@ enum LiveInterfaceCheck {
                   root.cornerRadii == (0, pillCornerRadius, pillCornerRadius, 0),
                   "\(root.cornerRadii)")
 
+            // Центр кромки тянет так же, как угол, и по всем четырём сторонам:
+            // подводим почти к середине края — остаток проходит прилипанием.
+            placePill(at: NSPoint(x: screen.frame.midX - pillSize.width / 2 + 12,
+                                  y: screen.frame.maxY - pillSize.height - 10))
+            check("У", "прилипла к центру верхней кромки",
+                  abs(pill().midX - screen.frame.midX) < 0.5
+                      && abs(pill().maxY - screen.frame.maxY) < 0.5,
+                  "пилюля \(pill()), экран \(screen.frame)")
+
+            placePill(at: NSPoint(x: screen.frame.midX - pillSize.width / 2 - 12,
+                                  y: screen.frame.minY + 10))
+            check("У", "прилипла к центру нижней кромки",
+                  abs(pill().midX - screen.frame.midX) < 0.5
+                      && abs(pill().minY - screen.frame.minY) < 0.5,
+                  "пилюля \(pill()), экран \(screen.frame)")
+
+            placePill(at: NSPoint(x: screen.frame.minX + 10,
+                                  y: screen.frame.midY - pillSize.height / 2 + 12))
+            check("У", "прилипла к центру левой кромки",
+                  abs(pill().minX - screen.frame.minX) < 0.5
+                      && abs(pill().midY - screen.frame.midY) < 0.5,
+                  "пилюля \(pill()), экран \(screen.frame)")
+
+            placePill(at: NSPoint(x: screen.frame.maxX - pillSize.width - 10,
+                                  y: screen.frame.midY - pillSize.height / 2 - 12))
+            check("У", "прилипла к центру правой кромки",
+                  abs(pill().maxX - screen.frame.maxX) < 0.5
+                      && abs(pill().midY - screen.frame.midY) < 0.5,
+                  "пилюля \(pill()), экран \(screen.frame)")
+
+            // В стороне от середины кромка не тянет: вдоль края окно едет
+            // свободно, иначе его нельзя было бы поставить рядом с центром.
+            placePill(at: NSPoint(x: screen.frame.midX - pillSize.width / 2 - 60,
+                                  y: screen.frame.maxY - pillSize.height))
+            check("У", "в стороне от центра кромка к середине не тянет",
+                  abs(pill().midX - (screen.frame.midX - 60)) < 0.5,
+                  "пилюля \(pill()), экран \(screen.frame)")
+
             // Вдали от краёв пилюля снова скруглена вся.
             placePill(at: NSPoint(x: screen.frame.midX, y: screen.frame.midY))
             check("У", "вдали от краёв скругление вернулось",
@@ -546,6 +584,26 @@ enum LiveInterfaceCheck {
             check("У", "прижаты низ и право — скруглён только левый верхний",
                   cornerRadii(touching: [.bottom, .right], radius: 8) == (8, 0, 0, 0),
                   "\(cornerRadii(touching: [.bottom, .right], radius: 8))")
+
+            // Притяжение — тоже чистой функцией, на выдуманном экране 1000×1000.
+            let box = NSRect(x: 0, y: 0, width: 1000, height: 1000)
+            check("У", "у середины верхней кромки притягивает центр",
+                  snapSpot(for: NSRect(x: 410, y: 890, width: 200, height: 100),
+                           on: box, within: 24) == .topCenter)
+            check("У", "у самого угла важнее угол, а не центр",
+                  snapSpot(for: NSRect(x: 5, y: 890, width: 200, height: 100),
+                           on: box, within: 24) == .topLeft)
+            check("У", "кромка без середины не тянет",
+                  snapSpot(for: NSRect(x: 300, y: 890, width: 200, height: 100),
+                           on: box, within: 24) == nil)
+            check("У", "середина без кромки не тянет",
+                  snapSpot(for: NSRect(x: 410, y: 450, width: 200, height: 100),
+                           on: box, within: 24) == nil)
+            check("У", "ёмкая ширина ловит ту же середину и встаёт по ней",
+                  snapSpot(for: NSRect(x: 460, y: 890, width: 100, height: 100),
+                           on: box, within: 24)?
+                      .origin(for: NSSize(width: 100, height: 100), on: box)
+                      == NSPoint(x: 450, y: 900))
 
             window.setFrame(saved, display: true)
             pump(0.2)
@@ -871,6 +929,40 @@ enum LiveInterfaceCheck {
         button("Stop")?.performClick(nil)
         pump(0.5)
         check("В", "на экране выбора всегда полный вид", pillWidth() == full, "\(pillWidth())")
+
+        // Ловушка, ради которой это дописано: у пилюли, приклеенной к центру
+        // кромки, ёмкий вид держался левым краем — и съезжал с центра ровно
+        // на половину разницы между полной и ёмкой шириной.
+        if let screen = window.screen ?? NSScreen.main {
+            let inset = TimerWindowController.shadowMargin
+            let saved = window.frame
+            func pill() -> NSRect { window.frame.insetBy(dx: inset, dy: inset) }
+            func centered() -> Bool { abs(pill().midX - screen.frame.midX) < 0.5 }
+
+            // Почти к середине верхней кромки — остаток проходит прилипанием.
+            window.setFrame(NSRect(origin: NSPoint(x: screen.frame.midX - window.frame.width / 2 + 12,
+                                                   y: screen.frame.maxY - window.frame.height + 12),
+                                   size: window.frame.size), display: true)
+            pump(0.2)
+            check("В", "полный вид приклеился к центру верхней кромки",
+                  centered() && abs(pill().maxY - screen.frame.maxY) < 0.5,
+                  "пилюля \(pill()), экран \(screen.frame)")
+
+            pointer = pointerAway
+            button("25 min")?.performClick(nil)
+            controller.syncWidth(animated: true)
+            check("В", "свернувшись, пилюля остаётся ровно по центру кромки",
+                  wait(upTo: foldWait) { pillWidth() == compact } && centered(),
+                  "ширина \(pillWidth()), пилюля \(pill()), экран \(screen.frame)")
+
+            button("Stop")?.performClick(nil)
+            check("В", "и развернувшись обратно — с того же центра",
+                  wait(upTo: 2) { pillWidth() == full } && centered(),
+                  "пилюля \(pill()), экран \(screen.frame)")
+
+            window.setFrame(saved, display: true)
+            pump(0.2)
+        }
 
         // Курсор возвращаем на окно: дальше проверки про полный вид.
         pointer = NSPoint(x: window.frame.midX, y: window.frame.midY)

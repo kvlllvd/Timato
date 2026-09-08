@@ -843,8 +843,8 @@ final class FlipClockView: TrackerView {
 /// экрана, радиус обнуляется, чтобы окно ровно заполняло его, без зазора.
 typealias CornerRadii = (topLeft: CGFloat, topRight: CGFloat, bottomRight: CGFloat, bottomLeft: CGFloat)
 
-/// Прямоугольник с независимым радиусом на каждом углу. Точки углов — те же,
-/// что и в `ScreenCorner`: (minX, minY) это верхний левый угол в системе
+/// Прямоугольник с независимым радиусом на каждом углу. Точки углов заданы
+/// как (minX, minY) — верхний левый угол в системе
 /// координат вида, перевёрнутого сверху вниз (`isFlipped`).
 ///
 /// Общая для `RootView` (заливка) и тени окна (`shadowPath`) — форма обеих
@@ -1021,11 +1021,82 @@ final class RootView: TrackerView {
     }
 }
 
-// MARK: - Прилипание к углам экрана
+// MARK: - Прилипание к краям экрана
 
-/// Угол экрана, к которому сейчас приклеено окно — если приклеено.
-enum ScreenCorner {
+/// Место на экране, к которому прилипает окно: угол или середина одной из
+/// четырёх кромок.
+enum SnapSpot: Equatable {
     case topLeft, topRight, bottomLeft, bottomRight
+    case topCenter, bottomCenter, leftCenter, rightCenter
+
+    /// Держит ли это место пилюлю ровно по середине экрана по горизонтали.
+    /// От этого зависит свёртывание: у приклеенной к центру верхней или нижней
+    /// кромки на месте остаётся середина, а не край, — иначе ёмкий вид съехал
+    /// бы от центра на половину разницы в ширине.
+    var centersHorizontally: Bool {
+        self == .topCenter || self == .bottomCenter
+    }
+
+    /// Левый нижний угол пилюли размера `size`, поставленной в это место
+    /// экрана `screen`. Верх здесь — `maxY`: система координат экрана, а не
+    /// перевёрнутого вида.
+    func origin(for size: NSSize, on screen: NSRect) -> NSPoint {
+        let left = screen.minX
+        let right = screen.maxX - size.width
+        let middleX = screen.midX - size.width / 2
+        let bottom = screen.minY
+        let top = screen.maxY - size.height
+        let middleY = screen.midY - size.height / 2
+        switch self {
+        case .topLeft:      return NSPoint(x: left, y: top)
+        case .topRight:     return NSPoint(x: right, y: top)
+        case .bottomLeft:   return NSPoint(x: left, y: bottom)
+        case .bottomRight:  return NSPoint(x: right, y: bottom)
+        case .topCenter:    return NSPoint(x: middleX, y: top)
+        case .bottomCenter: return NSPoint(x: middleX, y: bottom)
+        case .leftCenter:   return NSPoint(x: left, y: middleY)
+        case .rightCenter:  return NSPoint(x: right, y: middleY)
+        }
+    }
+}
+
+/// Куда притянется пилюля `pill` на экране `screen`. `nil` — ни к чему: стоит
+/// там, где её и держат.
+///
+/// Притяжению нужны два совпадения сразу: либо две кромки — это угол экрана,
+/// либо кромка и середина её длины — это центр края. Одна кромка сама по себе
+/// не тянет: иначе окно магнитилось бы к верху или к боку экрана всякий раз,
+/// когда его просто тащат мимо, не целясь ни в угол, ни в центр.
+///
+/// Углы разобраны раньше центров: на узком экране пороги угла и центра кромки
+/// могут перекрыться, и тогда важнее угол — к нему пилюля встаёт вплотную
+/// двумя сторонами, а к центру только одной.
+func snapSpot(for pill: NSRect, on screen: NSRect, within distance: CGFloat) -> SnapSpot? {
+    let nearMinX = abs(pill.minX - screen.minX) < distance
+    let nearMaxX = abs(pill.maxX - screen.maxX) < distance
+    let nearMinY = abs(pill.minY - screen.minY) < distance
+    let nearMaxY = abs(pill.maxY - screen.maxY) < distance
+    // Центр считается по середине пилюли, а не по её краю: серединой она к
+    // центру кромки и встаёт — поэтому полная и ёмкая ширина ловят центр
+    // одинаково, и при свёртывании пилюля с него не сходит.
+    let nearMidX = abs(pill.midX - screen.midX) < distance
+    let nearMidY = abs(pill.midY - screen.midY) < distance
+
+    switch (nearMinX, nearMaxX, nearMinY, nearMaxY) {
+    case (true, _, _, true): return .topLeft
+    case (_, true, _, true): return .topRight
+    case (true, _, true, _): return .bottomLeft
+    case (_, true, true, _): return .bottomRight
+    default: break
+    }
+
+    switch (nearMinX, nearMaxX, nearMinY, nearMaxY, nearMidX, nearMidY) {
+    case (_, _, _, true, true, _): return .topCenter
+    case (_, _, true, _, true, _): return .bottomCenter
+    case (true, _, _, _, _, true): return .leftCenter
+    case (_, true, _, _, _, true): return .rightCenter
+    default: return nil
+    }
 }
 
 /// Стороны экрана, которых касается видимая пилюля. `top` и `bottom` названы
@@ -1055,8 +1126,8 @@ func cornerRadii(touching edges: ScreenEdges, radius: CGFloat) -> CornerRadii {
             bottomRight: corner([.bottom, .right]), bottomLeft: corner([.bottom, .left]))
 }
 
-/// Окно, которое во время перетаскивания прилипает к углам экрана и никогда
-/// не выходит за его границы.
+/// Окно, которое во время перетаскивания прилипает к углам экрана и к центрам
+/// его кромок, а за границы экрана не выходит никогда.
 ///
 /// Перетаскивание здесь своё, а не `isMovableByWindowBackground`. Системное
 /// таскание за фон окна уходит в оконный сервер: тот двигает окно мимо AppKit,
@@ -1069,7 +1140,8 @@ func cornerRadii(touching edges: ScreenEdges, radius: CGFloat) -> CornerRadii {
 /// Свой цикл двигает окно через `setFrameOrigin`, который никаких ограничений
 /// не накладывает: угол экрана достижим, и прилипание работает живьём.
 final class SnappingWindow: NSWindow {
-    /// Расстояние до края экрана, ближе которого окно прилипает к нему.
+    /// Расстояние до угла или до центра кромки, ближе которого окно прилипает.
+    /// Одна и та же мера и для края, и для середины: притяжение везде равно.
     static let snapDistance: CGFloat = 24
 
     /// Насколько нужно увести мышь, чтобы нажатие стало перетаскиванием.
@@ -1089,6 +1161,11 @@ final class SnappingWindow: NSWindow {
     /// Вызывается с новым набором сторон всякий раз, когда рамка окна
     /// ограничивается — в том числе с пустым, когда окно отходит от края.
     var onEdgesChange: ((ScreenEdges) -> Void)?
+
+    /// Приклеена ли пилюля к центру верхней или нижней кромки — то есть стоит
+    /// ли она ровно по середине экрана по горизонтали. Читается при смене
+    /// ширины: центрированная пилюля меняет её от середины, а не от края.
+    private(set) var centeredHorizontally = false
 
     /// Последний сообщённый набор — чтобы не перерисовывать скругление и тень
     /// на каждом событии перетаскивания: стороны меняются несколько раз за
@@ -1149,7 +1226,7 @@ final class SnappingWindow: NSWindow {
             guard abs(now.x - start.x) > Self.dragThreshold
                     || abs(now.y - start.y) > Self.dragThreshold else { continue }
             // Дальше окно ведёт свой обычный цикл переноса — с прилипанием
-            // к углам и упором в края экрана.
+            // к углам, к центрам кромок и упором в края экрана.
             mouseDown(with: next)
             return true
         }
@@ -1165,8 +1242,8 @@ final class SnappingWindow: NSWindow {
         settle(frameRect, on: screen ?? self.screen)
     }
 
-    /// Прилипание к углу, упор в границы экрана и пересчёт того, каким углом
-    /// окно сейчас прижато.
+    /// Прилипание к углу или к центру кромки, упор в границы экрана и
+    /// пересчёт того, какими сторонами окно сейчас прижато.
     private func settle(_ frameRect: NSRect, on screen: NSScreen?) -> NSRect {
         // Именно `frame`, а не `visibleFrame`: последний обрезан под меню и Док,
         // и его край совпадает с краем обычного окна на весь экран — из-за этого
@@ -1175,30 +1252,11 @@ final class SnappingWindow: NSWindow {
 
         var visible = frameRect.insetBy(dx: contentInset, dy: contentInset)
 
-        // Прилипание — только когда рядом сразу два края, то есть угол целиком.
-        // Поодиночке края не тянут: иначе окно магнитится к верху или к боку
-        // экрана даже тогда, когда его просто тащат мимо, не целясь в угол.
-        let nearMinX = abs(visible.minX - target.minX) < Self.snapDistance
-        let nearMaxX = abs(visible.maxX - target.maxX) < Self.snapDistance
-        let nearMinY = abs(visible.minY - target.minY) < Self.snapDistance
-        let nearMaxY = abs(visible.maxY - target.maxY) < Self.snapDistance
-
-        let snapCorner: ScreenCorner?
-        switch (nearMinX, nearMaxX, nearMinY, nearMaxY) {
-        case (true, _, _, true): snapCorner = .topLeft
-        case (_, true, _, true): snapCorner = .topRight
-        case (true, _, true, _): snapCorner = .bottomLeft
-        case (_, true, true, _): snapCorner = .bottomRight
-        default: snapCorner = nil
-        }
-
-        switch snapCorner {
-        case .topLeft:     visible.origin = NSPoint(x: target.minX, y: target.maxY - visible.height)
-        case .topRight:    visible.origin = NSPoint(x: target.maxX - visible.width, y: target.maxY - visible.height)
-        case .bottomLeft:  visible.origin = NSPoint(x: target.minX, y: target.minY)
-        case .bottomRight: visible.origin = NSPoint(x: target.maxX - visible.width, y: target.minY)
-        case nil: break
-        }
+        // Прилипание — к углу экрана или к центру одной из кромок; чем именно
+        // притягивает и почему только этим, разобрано в `snapSpot`.
+        let spot = snapSpot(for: visible, on: target, within: Self.snapDistance)
+        if let spot { visible.origin = spot.origin(for: visible.size, on: target) }
+        centeredHorizontally = spot?.centersHorizontally ?? false
 
         // Что бы ни случилось выше — видимая часть не должна оказаться за пределами экрана.
         visible.origin.x = min(max(visible.origin.x, target.minX), target.maxX - visible.width)
@@ -1799,10 +1857,16 @@ final class TimerWindowController: NSWindowController {
 
         var frame = window.frame
         frame.size.width = target + Self.shadowMargin * 2
+        // У пилюли, приклеенной к центру верхней или нижней кромки, на месте
+        // остаётся середина: ёмкий вид встаёт ровно по центру экрана, а не
+        // съезжает с него на половину разницы в ширине.
+        //
         // У окна, прижатого к правому углу экрана, на месте остаётся правый
         // край — иначе пилюля отлипала бы от угла и уезжала к середине.
         // В остальных случаях стоит левый: по нему выровнено содержимое.
-        if touchedEdges.contains(.right) {
+        if (window as? SnappingWindow)?.centeredHorizontally == true {
+            frame.origin.x = window.frame.midX - frame.width / 2
+        } else if touchedEdges.contains(.right) {
             frame.origin.x = window.frame.maxX - frame.width
         }
 

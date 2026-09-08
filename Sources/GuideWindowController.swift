@@ -131,8 +131,8 @@ final class GuideWindowController: NSWindowController {
         windowRows.append(row(dashesTitle: "Tap the dashes",
             body: "Shows a reset button in place of 25 / 50 — clears the count so far."))
         windowRows.append(row(symbol: "hand.draw", title: "Drag it anywhere",
-            body: "Grab any part of the window and move it. Near a screen corner it " +
-                  "snaps flush — right into the corner, under the menu bar or the Dock."))
+            body: "Grab any part of the window and move it. Near a screen corner, or the " +
+                  "middle of an edge, it snaps flush — under the menu bar or the Dock too."))
 
         // Пункты про идущий отсчёт. Про паузу текст один на обе темы: серый
         // фон паузы от темы не зависит — как и зелёный фон отдыха.
