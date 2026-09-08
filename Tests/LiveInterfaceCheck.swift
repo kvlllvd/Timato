@@ -703,12 +703,23 @@ enum LiveInterfaceCheck {
         let statusMenu = delegate.statusMenu
         let titles = statusMenu?.items.map { $0.isSeparatorItem ? "———" : $0.title } ?? []
         check("М", "пункты меню ровно те, что просили, и в том же порядке",
-              titles.count == 12 && titles[0].hasPrefix("Summary — ")
+              titles.count == 10 && titles[0].hasPrefix("Summary — ")
               && Array(titles.dropFirst()) == ["Mute", "———", "Size", "Theme",
-                                               "———", "Guide", "Feedback",
-                                               AppDelegate.updatesTitle(),
+                                               "———", "About",
                                                "———", "Reset", "Quit"], "\(titles)")
         check("М", "пункта «Show Timer» больше нет", !titles.contains("Show Timer"))
+
+        // «About» — третье вложенное меню рядом с «Size» и «Theme». Наружу и
+        // здесь вынесен один заголовок: справка и обе дороги в браузер лежат
+        // внутри, а на верхнем уровне их нет вовсе.
+        let aboutMenu = statusMenu?.items.first { $0.title == "About" }?.submenu
+        check("М", "«About» — выпадающий список из трёх пунктов",
+              aboutMenu?.items.map(\.title) == ["Feedback", "Guide",
+                                                AppDelegate.updatesTitle()],
+              "\(aboutMenu?.items.map(\.title) ?? [])")
+        check("М", "на верхнем уровне этих трёх пунктов нет",
+              !titles.contains("Guide") && !titles.contains("Feedback")
+              && !titles.contains(where: { $0.hasPrefix("Updates") }), "\(titles)")
 
         // Дороги наружу. Проверяется не то, что браузер открылся, а то, что
         // именно в него уедет: заголовок пункта обязан называть установленную
@@ -718,7 +729,7 @@ enum LiveInterfaceCheck {
         check("М", "версия читается из бандла, а не осталась заглушкой",
               Release.version != "dev", Release.version)
         check("М", "пункт обновлений называет установленную версию",
-              AppDelegate.updatesTitle() == "Updates — " + Release.version,
+              AppDelegate.updatesTitle() == "Updates (" + Release.version + ")",
               AppDelegate.updatesTitle())
 
         let feedback = URLComponents(string: Release.feedback)

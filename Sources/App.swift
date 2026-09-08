@@ -131,18 +131,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         themeItem.submenu = themeMenu
         syncThemeItems()
 
-        // Группа безобидных: справка и две дороги наружу. Ни одна ничего не
-        // меняет в приложении — промах по любой из трёх стоит закрытого окна
-        // браузера, поэтому черта отделяет их не друг от друга, а от «Reset»
-        // и «Quit» ниже.
+        // «About» — вложенным меню, третьим по счёту рядом с «Size» и «Theme»:
+        // наружу вынесен один заголовок, а внутри всё, что рассказывает о
+        // приложении и ведёт от него наружу. Ни один из трёх пунктов ничего в
+        // приложении не меняет, поэтому черта отделяет их не друг от друга, а
+        // от «Reset» и «Quit» ниже, где промах стоит набранных часов.
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Guide", action: #selector(openGuide), keyEquivalent: "").target = self
-        menu.addItem(withTitle: "Feedback", action: #selector(openFeedback), keyEquivalent: "").target = self
+        let aboutItem = menu.addItem(withTitle: "About", action: nil, keyEquivalent: "")
+        let aboutMenu = NSMenu()
+        aboutMenu.addItem(withTitle: "Feedback", action: #selector(openFeedback),
+                          keyEquivalent: "").target = self
+        aboutMenu.addItem(withTitle: "Guide", action: #selector(openGuide),
+                          keyEquivalent: "").target = self
         // Версия стоит в заголовке пункта тем же образом, каким «Summary»
         // несёт часы: её спрашивают ровно тогда, когда собираются писать об
         // ошибке или искать новую сборку, — то есть в этом самом месте меню.
-        menu.addItem(withTitle: Self.updatesTitle(), action: #selector(openUpdates),
-                     keyEquivalent: "").target = self
+        aboutMenu.addItem(withTitle: Self.updatesTitle(), action: #selector(openUpdates),
+                          keyEquivalent: "").target = self
+        aboutItem.submenu = aboutMenu
 
         // Последняя группа — то, чем заканчивают: сброс стирает весь сеанс,
         // выход гасит отсчёт. Оба отбиты чертой от «Guide», чтобы промах мимо
@@ -173,7 +179,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Заголовок пункта обновлений: он называет установленную версию, а не
     /// доступную. Доступную знает только страница релизов, и идти за ней в сеть
     /// приложение не станет — почему, разобрано в `Release`.
-    static func updatesTitle() -> String { "Updates — \(Release.version)" }
+    static func updatesTitle() -> String { "Updates (\(Release.version))" }
 
     /// Заголовок пункта звука: он называет действие, а не состояние. Когда звук
     /// включён — «Mute» (клик выключит), когда выключен — «Unmute».
