@@ -131,10 +131,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         themeItem.submenu = themeMenu
         syncThemeItems()
 
-        // Справка — сама по себе: по ней не промахиваются во вред, но и к двум
-        // выборам выше она отношения не имеет.
+        // Группа безобидных: справка и две дороги наружу. Ни одна ничего не
+        // меняет в приложении — промах по любой из трёх стоит закрытого окна
+        // браузера, поэтому черта отделяет их не друг от друга, а от «Reset»
+        // и «Quit» ниже.
         menu.addItem(.separator())
         menu.addItem(withTitle: "Guide", action: #selector(openGuide), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Feedback", action: #selector(openFeedback), keyEquivalent: "").target = self
+        // Версия стоит в заголовке пункта тем же образом, каким «Summary»
+        // несёт часы: её спрашивают ровно тогда, когда собираются писать об
+        // ошибке или искать новую сборку, — то есть в этом самом месте меню.
+        menu.addItem(withTitle: Self.updatesTitle(), action: #selector(openUpdates),
+                     keyEquivalent: "").target = self
 
         // Последняя группа — то, чем заканчивают: сброс стирает весь сеанс,
         // выход гасит отсчёт. Оба отбиты чертой от «Guide», чтобы промах мимо
@@ -161,6 +169,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let half = halves % Segments.halvesPerSegment != 0
         return "Summary — \(hours)\(half ? ",5" : "") h"
     }
+
+    /// Заголовок пункта обновлений: он называет установленную версию, а не
+    /// доступную. Доступную знает только страница релизов, и идти за ней в сеть
+    /// приложение не станет — почему, разобрано в `Release`.
+    static func updatesTitle() -> String { "Updates — \(Release.version)" }
 
     /// Заголовок пункта звука: он называет действие, а не состояние. Когда звук
     /// включён — «Mute» (клик выключит), когда выключен — «Unmute».
@@ -260,6 +273,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guide.showWindow(nil)
         guide.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// «Feedback» — форма отзыва в браузере, с уже подставленными версией и
+    /// системой. Отзыв внутри приложения не собирается: некуда его девать без
+    /// сервера, а с сервером у обещания «без сети» появилась бы оговорка.
+    @objc private func openFeedback() {
+        Release.open(Release.feedback)
+    }
+
+    /// «Updates — <версия>» — страница последнего релиза в браузере.
+    @objc private func openUpdates() {
+        Release.open(Release.latest)
     }
 
     /// «Reset» — тот же сброс, что и кнопкой в окне: обнуляет и ряд штрихов,

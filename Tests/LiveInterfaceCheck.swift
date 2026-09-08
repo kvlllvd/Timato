@@ -703,11 +703,39 @@ enum LiveInterfaceCheck {
         let statusMenu = delegate.statusMenu
         let titles = statusMenu?.items.map { $0.isSeparatorItem ? "———" : $0.title } ?? []
         check("М", "пункты меню ровно те, что просили, и в том же порядке",
-              titles.count == 10 && titles[0].hasPrefix("Summary — ")
+              titles.count == 12 && titles[0].hasPrefix("Summary — ")
               && Array(titles.dropFirst()) == ["Mute", "———", "Size", "Theme",
-                                               "———", "Guide",
+                                               "———", "Guide", "Feedback",
+                                               AppDelegate.updatesTitle(),
                                                "———", "Reset", "Quit"], "\(titles)")
         check("М", "пункта «Show Timer» больше нет", !titles.contains("Show Timer"))
+
+        // Дороги наружу. Проверяется не то, что браузер открылся, а то, что
+        // именно в него уедет: заголовок пункта обязан называть установленную
+        // версию, а форма отзыва — принести версию, сборку, коммит и систему.
+        // Спрашивать это у человека бесполезно — таких вещей про себя не знают,
+        // а без них отзыв не привязать ни к коммиту, ни к машине.
+        check("М", "версия читается из бандла, а не осталась заглушкой",
+              Release.version != "dev", Release.version)
+        check("М", "пункт обновлений называет установленную версию",
+              AppDelegate.updatesTitle() == "Updates — " + Release.version,
+              AppDelegate.updatesTitle())
+
+        let feedback = URLComponents(string: Release.feedback)
+        let sent = { (name: String) in feedback?.queryItems?.first { $0.name == name }?.value }
+        check("М", "отзыв уходит в форму feedback.yml того самого репозитория",
+              feedback?.host == "github.com"
+              && feedback?.path == "/kvlllvd/Timato/issues/new"
+              && sent("template") == "feedback.yml", Release.feedback)
+        check("М", "в форму подставлены версия, сборка и коммит",
+              sent("version") == Release.stamp
+              && Release.stamp.hasPrefix(Release.version + " (")
+              && Release.stamp.hasSuffix(")")
+              && !Release.stamp.contains("unknown"), Release.stamp)
+        check("М", "и система вместе со срезом, на котором приложение работает",
+              sent("system")?.hasPrefix("macOS ") == true
+              && (sent("system")?.hasSuffix("Apple Silicon") == true
+                  || sent("system")?.hasSuffix("Intel") == true), sent("system") ?? "—")
 
         // Вид трекера — вложенным меню: наружу вынесен один заголовок, оба
         // варианта внутри, адаптивный первым.

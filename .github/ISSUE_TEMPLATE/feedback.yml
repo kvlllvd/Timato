@@ -1,0 +1,62 @@
+name: Отзыв
+description: Что не так, чего не хватает или что непонятно
+labels: ["feedback"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Версия и система подставляются сами, если открыть эту форму из меню
+        помидора — пункт **Feedback**. Если форма открыта из браузера, поля
+        ниже можно заполнить руками: версия видна в том же меню, в пункте
+        `Updates — …`.
+
+  - type: dropdown
+    id: type
+    attributes:
+      label: Что за отзыв
+      options:
+        - Что-то не работает
+        - Не хватает
+        - Непонятно
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: О какой части
+      description: По этому полю отзывы складываются в кучки — выбор важнее текста.
+      options:
+        - Окно и перенос
+        - Отсчёт, отдых и звонок
+        - Тема оформления
+        - Засечки и Summary
+        - Adaptive и размер окна
+        - Установка и первый запуск
+        - Другое
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: Что случилось
+      description: Что вы делали, что ожидали увидеть и что увидели вместо этого.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Версия Timato
+      placeholder: 1.0 (12)
+    validations:
+      required: false
+
+  - type: input
+    id: system
+    attributes:
+      label: Система
+      placeholder: macOS 15.1, Apple Silicon
+    validations:
+      required: false

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Сборка Timato без Xcode: только Command Line Tools.
-#   ./build.sh            собрать Timato.app и dist/Timato.dmg
+#   ./build.sh            собрать Timato.app и dist/Timato-<версия>.dmg
 #   ./build.sh --app      только Timato.app, без упаковки
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -8,7 +8,24 @@ cd "$(dirname "$0")"
 APP_NAME="Timato"
 EXEC_NAME="Timato"
 BUNDLE_ID="com.dkovalev.timato"
-VERSION="1.0"
+# Версия — в файле VERSION, одной строкой. Её читает и сборка, и релиз: держать
+# номер в двух местах — однажды выпустить образ, который называет себя не тем,
+# что он есть, и получить отзыв, к которому не привязать коммит.
+VERSION=$(tr -d ' \n' < VERSION)
+# Номер сборки — сколько коммитов было на момент сборки, и короткий хеш того
+# коммита. По ним из любого бандла достаётся исходник, из которого он собран.
+# Прогон тестов собирает копию из одних отслеживаемых файлов, без .git: там git
+# молчать обязан, поэтому оба значения имеют запасной ответ, а не роняют сборку.
+# Плюс к хешу — знак, что в дереве были незакоммиченные правки: такой бандл
+# ни одному коммиту не соответствует, и по отзыву с ним искать нечего.
+if git rev-parse --git-dir >/dev/null 2>&1; then
+    BUILD=$(git rev-list --count HEAD)
+    COMMIT=$(git rev-parse --short HEAD)
+    git diff --quiet HEAD || COMMIT="$COMMIT+"
+else
+    BUILD=0
+    COMMIT="unknown"
+fi
 # Порог системы. Ниже 13.0 не опускается, и это не осторожность, а упор в
 # инструменты: до 13.0 Swift подцепляет шимы совместимости
 # (libswiftCompatibility56.a и libswiftCompatibilityPacks.a), а в Command Line
@@ -61,7 +78,9 @@ cat > "$APP_STAGE/Contents/Info.plist" <<PLIST
     <key>CFBundleIdentifier</key>        <string>$BUNDLE_ID</string>
     <key>CFBundlePackageType</key>       <string>APPL</string>
     <key>CFBundleShortVersionString</key><string>$VERSION</string>
-    <key>CFBundleVersion</key>           <string>$VERSION</string>
+    <key>CFBundleVersion</key>           <string>$BUILD</string>
+    <!-- Коммит сборки: приложение подставляет его в форму отзыва. -->
+    <key>TimatoCommit</key>              <string>$COMMIT</string>
     <key>LSMinimumSystemVersion</key>    <string>$MIN_MACOS</string>
     <key>NSHighResolutionCapable</key>   <true/>
     <key>LSApplicationCategoryType</key> <string>public.app-category.productivity</string>
@@ -98,7 +117,12 @@ codesign --verify "$APP_STAGE"
 # сверяем значение, а не просто «строка непустая».
 GOT_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP_STAGE/Contents/Info.plist")
 [ "$GOT_ID" = "$BUNDLE_ID" ] || { echo "   ✗ bundle id: ожидался $BUNDLE_ID, получено «$GOT_ID»"; exit 1; }
+# Версию в бандле сверяем с файлом VERSION: её показывает меню и её же несёт
+# отзыв, а пустая или устаревшая строка здесь молча обесценит и то, и другое.
+GOT_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP_STAGE/Contents/Info.plist")
+[ "$GOT_VERSION" = "$VERSION" ] || { echo "   ✗ версия: ожидалась $VERSION, получено «$GOT_VERSION»"; exit 1; }
 echo "   ✓ бандл целый: срезы $ARCHS, читаемая иконка, подпись, bundle id $GOT_ID"
+echo "   ✓ версия $VERSION, сборка $BUILD, коммит $COMMIT"
 
 rm -rf "$APP"
 mv "$APP_STAGE" "$APP"
@@ -108,7 +132,7 @@ echo "✓ приложение: $APP"
 if [ "${1:-}" = "--app" ]; then exit 0; fi
 
 echo "→ упаковываю DMG"
-DMG="$DIST_DIR/$APP_NAME.dmg"
+DMG="$DIST_DIR/$APP_NAME-$VERSION.dmg"
 DMG_ROOT="$BUILD_DIR/dmgroot"
 rm -rf "$DMG_ROOT"; mkdir -p "$DMG_ROOT"
 cp -R "$APP" "$DMG_ROOT/"

@@ -10,6 +10,9 @@ mkdir -p build
 FAILED=0
 APP="build/Timato.app"
 EXEC="$APP/Contents/MacOS/Timato"
+# Имя образа несёт версию, поэтому оно считается, а не пишется: иначе проверки
+# DMG после смены версии искали бы файл, которого сборка больше не делает.
+DMG="dist/Timato-$(tr -d ' \n' < VERSION).dmg"
 
 echo "════ Сборка приложения целиком ════"
 if ./build.sh --app > /tmp/timer-build.log 2>&1; then
@@ -115,20 +118,20 @@ echo
 # «Resource temporarily unavailable», и проверка врала бы про сломанный DMG.
 detach_stale_image() {
     hdiutil info 2>/dev/null \
-        | awk '/^image-path/ {p=$3} /^\/dev\/disk/ {if (index(p, "dist/Timato.dmg") > 0) print $1}' \
+        | awk -v DMG="$DMG" '/^image-path/ {p=$3} /^\/dev\/disk/ {if (index(p, DMG) > 0) print $1}' \
         | while read -r dev; do hdiutil detach "$dev" -force -quiet 2>/dev/null || true; done
 }
 
 echo "════ Ф3.1–Ф3.3 · DMG ════"
 detach_stale_image
-if ./build.sh > /tmp/timer-dmg.log 2>&1 && [ -f "dist/Timato.dmg" ]; then
-    echo "  ✓ Ф3.1 ./build.sh создал dist/Timato.dmg ($(du -h dist/Timato.dmg | cut -f1))"
+if ./build.sh > /tmp/timer-dmg.log 2>&1 && [ -f "$DMG" ]; then
+    echo "  ✓ Ф3.1 ./build.sh создал $DMG ($(du -h "$DMG" | cut -f1))"
 else
     echo "  ✗ Ф3.1 DMG не собрался"; FAILED=1
 fi
-MP=$(hdiutil attach "dist/Timato.dmg" -nobrowse -readonly 2>/dev/null | grep -o '/Volumes/.*$' | head -1)
+MP=$(hdiutil attach "$DMG" -nobrowse -readonly 2>/dev/null | grep -o '/Volumes/.*$' | head -1)
 if [ -z "$MP" ]; then detach_stale_image; sleep 0.5
-    MP=$(hdiutil attach "dist/Timato.dmg" -nobrowse -readonly 2>/dev/null | grep -o '/Volumes/.*$' | head -1)
+    MP=$(hdiutil attach "$DMG" -nobrowse -readonly 2>/dev/null | grep -o '/Volumes/.*$' | head -1)
 fi
 if [ -n "$MP" ]; then
     if [ -d "$MP/Timato.app" ]; then echo "  ✓ Ф3.2 внутри образа есть Timato.app"; else echo "  ✗ Ф3.2 в образе нет Timato.app"; FAILED=1; fi
